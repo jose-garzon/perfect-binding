@@ -517,3 +517,27 @@ input[type="range"]:disabled { opacity: .35; }
   pointer-events: none;
 }
 .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+
+/* ── update notice ────────────────────────────────────────────────────────
+   A hairline strip under the masthead, present only when a newer release
+   exists. Quiet by design: this is news, not an interruption. */
+.update-bar {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  padding: 0 24px; height: 38px;
+  background: var(--spot-wash);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--t-2);
+}
+.update-bar .update-version {
+  font-weight: 700; letter-spacing: -.01em; color: var(--spot);
+}
+.update-bar .update-text { color: var(--ink-2); }
+.update-bar .spacer { flex: 1; }
+
+.link-btn {
+  border: 0; background: none; padding: 4px 2px; cursor: pointer;
+  font-size: var(--t-1); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.link-btn:hover { color: var(--ink); text-decoration: underline; }
+.link-btn:focus-visible { outline: 2px solid var(--spot); outline-offset: 2px; }

@@ -9,6 +9,9 @@ const fs = require("node:fs");
 const { applyCsp } = require("../electron/csp.cjs");
 const { samplePdf } = require("./sample-pdf.cjs");
 
+// Keep the run hermetic: no update check, no network.
+process.env.PB_NO_UPDATE_CHECK = "1";
+
 const OUT = process.env.PB_SMOKE_OUT || "/tmp/pb-smoke.png";
 const errors = [];
 
@@ -114,7 +117,8 @@ app.whenReady().then(async () => {
     const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
     let ink = 0;
     for (let i = 0; i < px.length; i += 4) if (px[i] < 240) ink++;
-    if (ink === ${state.inkPixels}) return null;
+    // mid-render the canvas reads as blank, so wait for a real increase
+    if (ink <= ${state.inkPixels}) return null;
     return { ink, inset: box.style.left, trimmed: [...document.querySelectorAll('.stat')].pop().innerText };
   })()`, 25000);
   if (!cropped) fail("crop panel never appeared");

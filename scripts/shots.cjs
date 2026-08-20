@@ -9,6 +9,9 @@ const fs = require("node:fs");
 const { applyCsp } = require("../electron/csp.cjs");
 const { samplePdf } = require("./sample-pdf.cjs");
 
+// Keep the run hermetic: no update check, no network.
+process.env.PB_NO_UPDATE_CHECK = "1";
+
 const OUT = path.join(__dirname, "..", "assets", "screenshots");
 const SIZE = { width: 1400, height: 900 };
 

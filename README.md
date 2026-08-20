@@ -26,8 +26,10 @@ Everything runs locally — the PDF never leaves the machine.
 - **Paper and spine controls.** A4, Letter, Legal, A3, Tabloid, or A5; outer
   margin and spine gutter in millimetres; signature size for thick
   saddle-stitched books that would otherwise fold badly at the fore-edge.
-- **Offline by construction.** No network calls, no telemetry, no upload step.
-  The Electron shell runs under `default-src 'self'`.
+- **Offline by construction.** No telemetry, no upload step, no account. The
+  renderer runs under `default-src 'self'` and makes no network requests at all;
+  the one outbound call in the app is the update check below, and it can be
+  switched off.
 
 ![The working view: binding cards, paper controls, and the sheet proof](assets/screenshots/editing.png)
 
@@ -55,6 +57,27 @@ so SmartScreen warns on first launch: *More info → Run anyway*.
 **macOS** — open the `.dmg` (`-arm64` for Apple silicon, `-x64` for Intel) and
 drag the app to Applications. Also unsigned, so the first launch needs
 right-click → *Open* rather than a double-click.
+
+## Updating
+
+The app checks GitHub for a newer release once a day and shows a bar under the
+masthead when there is one. It never downloads or installs anything — you decide.
+*Not now* hides that version, *Stop checking* turns the check off for good, and
+**File → Check for Updates…** asks on demand even when the check is off.
+
+Installing the new version over the old one needs no uninstall:
+
+| Platform | Upgrading |
+| --- | --- |
+| Windows | Run the new `.exe`; the installer replaces the previous version |
+| macOS | Drag to Applications and confirm the replace |
+| Linux AppImage | Overwrite the old file, or delete it and run the new one |
+| Linux `.deb` | `sudo apt install ./PerfectBinding-*-linux-amd64.deb` |
+
+What the check sends: a plain GET to `api.github.com` for the latest release tag,
+no identifiers attached. The preference and the last-checked timestamp live in
+`settings.json` in the app's user-data directory. Set `PB_NO_UPDATE_CHECK=1` to
+disable it for a run — the smoke test and the screenshot script both do.
 
 ## Build it from source
 
@@ -148,7 +171,7 @@ src/core/         pure logic, no DOM — unit tested
 src/renderer/     React UI (no framework beyond React + hand-written CSS)
   lib/pdf.ts      pdf.js loading, page rendering, margin scanning
   fonts/          Archivo and Newsreader, Latin subsets, SIL OFL (see OFL.txt)
-electron/         main, preload, and the CSP applied as a response header
+electron/         main, preload, the CSP response header, and the update check
 scripts/          dev launcher, icon rasteriser, screenshots, smoke test
 assets/           icon.svg (the source), its PNGs, and the README screenshots
 ```

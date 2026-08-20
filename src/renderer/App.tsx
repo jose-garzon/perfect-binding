@@ -12,6 +12,7 @@ import { Field, Segmented, Select, Slider, Switch } from "./components/Controls"
 import {
   FoldedDiagram, MarginsDiagram, PerfectDiagram, SaddleDiagram,
 } from "./components/Diagrams";
+import { UpdateBar, useUpdate } from "./components/UpdateBar";
 
 /**
  * "folded" is a saddle imposition with exactly one sheet per signature: every
@@ -128,6 +129,7 @@ export default function App() {
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const update = useUpdate();
   const buildId = useRef(0);
 
   const set = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -253,7 +255,7 @@ export default function App() {
   const sheets = pageCount ? sheetsFor(pageCount) : 0;
   const isBooklet = settings.binding !== "none";
 
-  if (!file) return <Landing onFile={openFile} error={error} />;
+  if (!file) return <Landing onFile={openFile} error={error} update={update} />;
 
   return (
     <div className="app">
@@ -284,6 +286,7 @@ export default function App() {
           {saved ? "Saved ✓" : "Export PDF"}
         </button>
       </header>
+      <UpdateBar {...update} />
 
       <div className="body">
         <aside className="column">
@@ -439,14 +442,19 @@ function Stat({ k, v }: { k: string; v: string }) {
  * plate on the right, and the four methods below as a directory of hairline
  * cells — the reference magazine's directory spread.
  */
-function Landing({ onFile, error }: { onFile: (f: File) => void; error: string | null }) {
+function Landing({ onFile, error, update }: {
+  onFile: (f: File) => void;
+  error: string | null;
+  update: ReturnType<typeof useUpdate>;
+}) {
   return (
     <div className="app">
       <header className="masthead">
         <Wordmark />
         <div className="spacer" />
-        <span className="folio-line">Runs entirely on this machine</span>
+        <span className="folio-line">Your PDF never leaves this machine</span>
       </header>
+      <UpdateBar {...update} />
 
       <div className="cover">
         <div className="cover-inner">

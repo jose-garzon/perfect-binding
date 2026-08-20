@@ -47,6 +47,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "!electron/*.test.ts",
       "assets/icons/**/*",
       "package.json"
     ],

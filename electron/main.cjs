@@ -2,6 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell, Menu } = require("electron")
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const { applyCsp } = require("./csp.cjs");
+const updates = require("./updates.cjs");
 
 const DEV_URL = process.env.PB_DEV_URL;
 
@@ -53,11 +54,40 @@ ipcMain.handle("save-pdf", async (event, suggestedName, bytes) => {
   return true;
 });
 
+/* ── update notices ───────────────────────────────────────────────────────
+   The renderer never touches the network — it asks here, and gets back either
+   a newer version or null. See electron/updates.cjs. */
+ipcMain.handle("updates:check", (_e, { force } = {}) => updates.checkForUpdate({ force }));
+
+ipcMain.handle("updates:enabled", async (_e, value) => {
+  const settings = value === undefined
+    ? await updates.readSettings()
+    : await updates.writeSettings({ updateChecks: Boolean(value) });
+  return settings.updateChecks;
+});
+
+ipcMain.handle("updates:skip", (_e, version) => updates.writeSettings({ skipped: version || null }));
+
+ipcMain.handle("open-release-page", (_e, url) => {
+  // Only ever hand the browser a github.com URL, whatever the renderer asks for.
+  const target = new URL(url || updates.RELEASES_PAGE);
+  if (target.protocol !== "https:" || !/(^|\.)github\.com$/.test(target.hostname)) return false;
+  shell.openExternal(target.href);
+  return true;
+});
+
 app.whenReady().then(() => {
   applyCsp(DEV_URL);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
-    { role: "fileMenu" },
+    {
+      label: "File",
+      submenu: [
+        { label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
+        { type: "separator" },
+        process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+      ],
+    },
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },
@@ -67,6 +97,23 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+/** The menu item forces a check, so it answers even when checks are switched off. */
+async function checkForUpdatesFromMenu() {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  if (!win) return;
+  const update = await updates.checkForUpdate({ force: true });
+  if (update) {
+    win.webContents.send("updates:found", update);
+    return;
+  }
+  await dialog.showMessageBox(win, {
+    type: "info",
+    message: `Perfect Binding ${app.getVersion()} is up to date.`,
+    detail: "If you are offline, try again once you have a connection.",
+    buttons: ["OK"],
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
