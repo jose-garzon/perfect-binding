@@ -67,6 +67,28 @@ describe("saddle stitch", () => {
     );
   });
 
+  test("one sheet per signature = fold each sheet on its own, then stack", () => {
+    const sides = impose({ binding: "saddle", pageCount: 8, sheetsPerSignature: 1 });
+    expect(sides.map(pair)).toEqual([
+      [4, 1],
+      [2, 3],
+      [8, 5],
+      [6, 7],
+    ]);
+    expect(assemble(sides, { binding: "saddle", sheetsPerSignature: 1 })).toEqual(
+      [1, 2, 3, 4, 5, 6, 7, 8],
+    );
+  });
+
+  test("single-sheet signatures round-trip at any length", () => {
+    for (const n of [4, 8, 20, 33]) {
+      const sides = impose({ binding: "saddle", pageCount: n, sheetsPerSignature: 1 });
+      const pages = assemble(sides, { binding: "saddle", sheetsPerSignature: 1 });
+      expect(pages.slice(0, n)).toEqual(Array.from({ length: n }, (_, i) => i + 1));
+      expect(pages.slice(n).every((p) => p === null)).toBe(true);
+    }
+  });
+
   test("a partial last signature still round-trips", () => {
     const sides = impose({ binding: "saddle", pageCount: 24, sheetsPerSignature: 4 });
     expect(assemble(sides, { binding: "saddle", sheetsPerSignature: 4 })).toEqual(

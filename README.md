@@ -1,8 +1,9 @@
 # Perfect Binding
 
 Desktop app that turns a PDF into a print-ready booklet. Reorders pages for
-**stitched (saddle) binding** or **perfect binding**, trims dead margins so the
-text prints larger, and previews every sheet before you export.
+**stitched (saddle) binding**, **folded & glued**, or **perfect binding**, trims
+dead margins so the text prints larger, and previews every sheet before you
+export.
 
 Everything runs locally — the PDF never leaves the machine.
 
@@ -27,13 +28,19 @@ Other scripts:
 | `bun run smoke:dev` | Same checks against a running `bun run web` dev server (React development build) |
 | `bun run typecheck` | `tsc --noEmit` |
 
-## What the three modes do
+## What the four modes do
 
 **Stitched (saddle).** Sheets nest inside one another and are stapled through
 the fold, so the outermost sheet carries the first and last pages. Page count is
 padded to a multiple of 4. Thick books fold badly at the fore-edge, so the
 signature slider splits the job into nested groups of N sheets that you bind
 together afterwards.
+
+**Folded & glued.** Every sheet is folded on its own — no nesting — and the
+folded sheets are stacked and glued at the spine. This is a saddle imposition
+with exactly one sheet per signature, so sheet 1 carries pages 4 and 1 on the
+front and 2 and 3 on the back. The spine stays square no matter how long the
+document is, and nothing needs stapling.
 
 **Perfect binding.** Sheets stay flat and are printed as a *cut stack*: sheet 1
 carries pages 1 and 1+N/2, sheet 2 carries pages 2 and 2+N/2, and so on. Slice
@@ -75,7 +82,7 @@ that is already being painted, which React Strict Mode triggers constantly.
 
 ```
 src/core/         pure logic, no DOM — unit tested
-  imposition.ts   page order → sheet sides
+  imposition.ts   page order → sheet sides (signature size 1 = folded & glued)
   crop.ts         whitespace detection over raw pixels
   build.ts        pdf-lib output assembly
   paper.ts        paper sizes in points

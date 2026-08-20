@@ -32,6 +32,26 @@ export function SaddleDiagram({ width = 76, height = 56 }: Props) {
   );
 }
 
+/** Each sheet folded on its own, the folded sheets stacked and glued. */
+export function FoldedDiagram({ width = 76, height = 56 }: Props) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true">
+      {[0, 1, 2].map((i) => {
+        const top = 11 + i * 14;
+        return (
+          <path
+            key={i}
+            d={`M68 ${top} L20 ${top} C 10 ${top}, 10 ${top + 10}, 20 ${top + 10} L64 ${top + 10}`}
+            fill="none" stroke={i === 0 ? ink : faint} strokeWidth="1.5"
+            strokeLinecap="round" strokeLinejoin="round"
+          />
+        );
+      })}
+      <rect x="10" y="8" width="4" height="42" rx="2" fill={accent} opacity=".9" />
+    </svg>
+  );
+}
+
 /** Loose leaves stacked flat, glued along the spine. */
 export function PerfectDiagram({ width = 76, height = 56 }: Props) {
   return (
@@ -69,21 +89,22 @@ export function MarginsDiagram({ width = 76, height = 56 }: Props) {
 }
 
 /** How the printed sheet is folded or cut, shown next to the preview. */
-export function SheetDiagram({ binding }: { binding: "saddle" | "perfect" | "none" }) {
+export function SheetDiagram({ binding }: { binding: "saddle" | "folded" | "perfect" | "none" }) {
   if (binding === "none") return null;
+  const folds = binding !== "perfect";
   return (
     <svg width="74" height="42" viewBox="0 0 74 42" fill="none" aria-hidden="true">
       <rect x="5" y="3" width="64" height="26" rx="2"
         fill="var(--surface)" stroke={faint} strokeWidth="1.1" />
       <line x1="37" y1="1" x2="37" y2="31" stroke={accent} strokeWidth="1.2"
-        strokeDasharray={binding === "saddle" ? "4 3" : "0"} />
+        strokeDasharray={folds ? "4 3" : "0"} />
       {binding === "perfect" && (
         <>
           <path d="M37 1 L34 5 M37 1 L40 5" stroke={accent} strokeWidth="1.2" strokeLinecap="round" />
           <text x="37" y="39" fill="var(--ink-3)" fontSize="8" textAnchor="middle">cut here</text>
         </>
       )}
-      {binding === "saddle" && (
+      {folds && (
         <text x="37" y="39" fill="var(--ink-3)" fontSize="8" textAnchor="middle">fold here</text>
       )}
     </svg>

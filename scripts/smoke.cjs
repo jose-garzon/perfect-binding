@@ -59,6 +59,8 @@ app.whenReady().then(async () => {
   if (!mounted) fail("renderer did not mount");
   console.log("mounted:", JSON.stringify(mounted));
 
+  await shoot(win, OUT.replace(/\.png$/, "-landing.png"));
+
   const pdf = await samplePdf();
   console.log("sample pdf:", (pdf.length / 1024).toFixed(0), "KB");
   // The packaged app must refuse inline scripts; the dev server needs them for HMR.
@@ -95,9 +97,12 @@ app.whenReady().then(async () => {
     const px = ctx.getImageData(0, 0, c.width, c.height).data;
     let ink = 0;
     for (let i = 0; i < px.length; i += 4) if (px[i] < 240) ink++;
+    let hash = 0;
+    for (let i = 0; i < px.length; i += 4) hash = (hash * 31 + px[i]) % 2147483647;
     return {
       canvas: [c.width, c.height],
       inkPixels: ink,
+      hash,
       stats: [...document.querySelectorAll('.stat')].map(s => s.innerText.replace('\\n', ': ')),
       label: document.querySelector('.sheet-label')?.innerText,
     };
@@ -147,12 +152,46 @@ app.whenReady().then(async () => {
   const perfect = await waitFor(win, `(() => {
     const label = document.querySelector('.sheet-label')?.innerText;
     const c = document.querySelector('.sheet canvas');
-    return label && c && c.width !== 300 && !document.querySelector('.sheet .fold')
-      ? { label, guide: !!document.querySelector('.sheet .fold') } : null;
+    if (!label || !c || c.width === 300 || document.querySelector('.sheet .fold')) return null;
+    const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let hash = 0;
+    for (let i = 0; i < px.length; i += 4) hash = (hash * 31 + px[i]) % 2147483647;
+    return { label, hash, fold: !!document.querySelector('.sheet .fold') };
   })()`, 20000);
   if (!perfect) fail("perfect binding layout never rendered");
   console.log("perfect:", JSON.stringify(perfect));
   await shoot(win, OUT.replace(/\.png$/, "-perfect.png"));
+
+  // 4. fold-and-glue: saddle imposition with one sheet per signature, so the
+  //    first sheet must carry pages 4 and 1 rather than the last page and 1
+  await win.webContents.executeJavaScript(
+    `[...document.querySelectorAll('.card')].find(b => b.innerText.includes('Folded & glued')).click(), true`);
+  const folded = await waitFor(win, `(() => {
+    const c = document.querySelector('.sheet canvas');
+    if (!c || c.width === 300) return null;
+    const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let hash = 0;
+    for (let i = 0; i < px.length; i += 4) hash = (hash * 31 + px[i]) % 2147483647;
+    if (hash === ${perfect.hash}) return null;
+    return {
+      hash,
+      label: document.querySelector('.sheet-label')?.innerText,
+      fold: !!document.querySelector('.sheet .fold'),
+      steps: [...document.querySelectorAll('.section ol li')].map(li => li.innerText)[1],
+    };
+  })()`, 20000);
+  if (!folded) {
+    const diag = await win.webContents.executeJavaScript(
+      `({ cards: [...document.querySelectorAll('.card')].map(b => [b.innerText.split('\\n')[0], b.getAttribute('aria-pressed')]),
+          label: document.querySelector('.sheet-label')?.innerText,
+          error: document.querySelector('.error')?.innerText || null })`);
+    console.error("diagnostics:", JSON.stringify(diag, null, 2));
+    fail("folded & glued layout never rendered");
+  }
+  console.log("folded:", JSON.stringify(folded));
+  if (!folded.fold) fail("fold guide missing in folded mode");
+  if (folded.hash === state.hash) fail("folded mode imposed the same sheet as saddle stitch");
+  await shoot(win, OUT.replace(/\.png$/, "-folded.png"));
 
   if (errors.length) fail(`console errors:\n${errors.join("\n")}`);
   console.log("SMOKE OK");

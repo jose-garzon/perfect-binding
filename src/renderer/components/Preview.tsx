@@ -13,7 +13,7 @@ import { SheetDiagram } from "./Diagrams";
 export function Preview({ src, layout, binding, busy, sheetCount }: {
   src: string | null;
   layout: SheetSide[];
-  binding: "saddle" | "perfect" | "none";
+  binding: "saddle" | "folded" | "perfect" | "none";
   busy: boolean;
   sheetCount: number;
 }) {
@@ -98,7 +98,7 @@ export function Preview({ src, layout, binding, busy, sheetCount }: {
       <div className="stage" ref={stage}>
         <div className={`sheet${busy ? "" : " turning"}`} key={index}>
           <canvas ref={canvas} />
-          {binding === "saddle" && <span className="fold" />}
+          {binding !== "perfect" && binding !== "none" && <span className="fold" />}
         </div>
       </div>
     </section>

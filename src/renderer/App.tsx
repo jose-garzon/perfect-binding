@@ -9,9 +9,16 @@ import { Dropzone } from "./components/Dropzone";
 import { Preview } from "./components/Preview";
 import { CropPanel } from "./components/CropPanel";
 import { Field, Segmented, Select, Slider, Switch } from "./components/Controls";
-import { MarginsDiagram, PerfectDiagram, SaddleDiagram } from "./components/Diagrams";
+import {
+  FoldedDiagram, MarginsDiagram, PerfectDiagram, SaddleDiagram,
+} from "./components/Diagrams";
 
-type BindingChoice = "saddle" | "perfect" | "none";
+/**
+ * "folded" is a saddle imposition with exactly one sheet per signature: every
+ * sheet is folded on its own, the folded sheets are stacked, and the spine is
+ * glued rather than stapled.
+ */
+type BindingChoice = "saddle" | "folded" | "perfect" | "none";
 
 interface Settings {
   binding: BindingChoice;
@@ -50,6 +57,11 @@ const BINDINGS: Array<{
     Diagram: SaddleDiagram,
   },
   {
+    id: "folded", title: "Folded & glued",
+    desc: "Fold every sheet on its own, stack the folded sheets, glue the spine.",
+    Diagram: FoldedDiagram,
+  },
+  {
     id: "perfect", title: "Perfect binding",
     desc: "Print flat, cut down the middle, stack the piles, glue the spine.",
     Diagram: PerfectDiagram,
@@ -61,12 +73,28 @@ const BINDINGS: Array<{
   },
 ];
 
+/** Maps a UI choice onto the core imposition options. */
+function coreBinding(choice: BindingChoice, sheetsPerSignature: number) {
+  if (choice === "none") return { binding: "none" as const, sheetsPerSignature: 0 };
+  if (choice === "perfect") return { binding: "perfect" as const, sheetsPerSignature: 0 };
+  return {
+    binding: "saddle" as const,
+    sheetsPerSignature: choice === "folded" ? 1 : sheetsPerSignature,
+  };
+}
+
 const ASSEMBLY: Record<BindingChoice, string[]> = {
   saddle: [
     "Print double-sided on the chosen paper, landscape.",
     "Stack the sheets in printed order, keeping them flat.",
     "Fold the whole stack once down the middle.",
     "Staple twice through the fold, then trim the fore-edge.",
+  ],
+  folded: [
+    "Print double-sided on the chosen paper, landscape.",
+    "Fold each sheet in half on its own — no nesting.",
+    "Stack the folded sheets in printed order, folds all on the same side.",
+    "Clamp the folded spine, glue it, and let it cure before trimming.",
   ],
   perfect: [
     "Print double-sided on the chosen paper, landscape.",
@@ -173,13 +201,12 @@ export default function App() {
       setBuilding(true);
       try {
         const { bytes: outBytes, ...info } = await buildBooklet(bytes, {
-          binding: settings.binding,
+          ...coreBinding(settings.binding, settings.sheetsPerSignature),
           paperId: settings.paperId,
           crop: activeCrop,
           outerMargin: mm(settings.outerMargin),
           gutter: mm(settings.gutter),
           duplexFlip: settings.duplexFlip,
-          sheetsPerSignature: settings.sheetsPerSignature,
           rtl: settings.rtl,
           guideLine: settings.guideLine,
           cropMarks: settings.cropMarks,
@@ -332,6 +359,12 @@ export default function App() {
                     { value: "long", label: "Long edge" },
                   ]} />
               </Field>
+              {settings.binding === "folded" && (
+                <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+                  Each sheet holds 4 pages and is folded by itself, so the spine stays
+                  square however long the document is.
+                </p>
+              )}
               {settings.binding === "saddle" && (
                 <Field label="Signature size"
                   value={settings.sheetsPerSignature === 0 ? "one booklet" : `${settings.sheetsPerSignature} sheets`}
@@ -341,7 +374,7 @@ export default function App() {
                 </Field>
               )}
               <Field label="">
-                <Switch label={settings.binding === "saddle" ? "Fold line" : "Cut line"}
+                <Switch label={settings.binding === "perfect" ? "Cut line" : "Fold line"}
                   sub="Dashed guide down the middle of the sheet"
                   checked={settings.guideLine} onChange={(v) => set("guideLine", v)} />
               </Field>
@@ -403,8 +436,8 @@ function Landing({ onFile, error }: { onFile: (f: File) => void; error: string |
         <div className="empty-inner">
           <h1>Turn any PDF into a booklet</h1>
           <p className="lede">
-            Reorder pages for stitched or perfect binding, trim dead margins so the text
-            prints larger, and check every sheet before you print.
+            Reorder pages for stitched, folded, or perfect binding, trim dead margins so
+            the text prints larger, and check every sheet before you print.
           </p>
           <Dropzone onFile={onFile} />
           {error && <div className="error" style={{ marginTop: 16 }}>{error}</div>}
