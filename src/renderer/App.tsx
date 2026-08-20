@@ -1,0 +1,434 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PDFDocumentProxy } from "pdfjs-dist";
+import { buildBooklet, type BuildResult } from "../core/build";
+import { PAPER_SIZES, mm } from "../core/paper";
+import { sheetCount as sheetsFor, blankCount } from "../core/imposition";
+import { FULL_PAGE, type Bounds } from "../core/crop";
+import { closePdf, loadPdf, renderPage, scanMargins } from "./lib/pdf";
+import { Dropzone } from "./components/Dropzone";
+import { Preview } from "./components/Preview";
+import { CropPanel } from "./components/CropPanel";
+import { Field, Segmented, Select, Slider, Switch } from "./components/Controls";
+import { MarginsDiagram, PerfectDiagram, SaddleDiagram } from "./components/Diagrams";
+
+type BindingChoice = "saddle" | "perfect" | "none";
+
+interface Settings {
+  binding: BindingChoice;
+  paperId: string;
+  outerMargin: number; // mm
+  gutter: number; // mm
+  duplexFlip: "short" | "long";
+  sheetsPerSignature: number; // 0 = one signature
+  rtl: boolean;
+  guideLine: boolean;
+  cropMarks: boolean;
+  cropEnabled: boolean;
+  uniformCrop: boolean;
+}
+
+const DEFAULTS: Settings = {
+  binding: "saddle",
+  paperId: "a4",
+  outerMargin: 6,
+  gutter: 8,
+  duplexFlip: "short",
+  sheetsPerSignature: 0,
+  rtl: false,
+  guideLine: true,
+  cropMarks: false,
+  cropEnabled: false,
+  uniformCrop: true,
+};
+
+const BINDINGS: Array<{
+  id: BindingChoice; title: string; desc: string; Diagram: typeof SaddleDiagram;
+}> = [
+  {
+    id: "saddle", title: "Stitched (saddle)",
+    desc: "Sheets nest inside each other, fold once, staple the spine.",
+    Diagram: SaddleDiagram,
+  },
+  {
+    id: "perfect", title: "Perfect binding",
+    desc: "Print flat, cut down the middle, stack the piles, glue the spine.",
+    Diagram: PerfectDiagram,
+  },
+  {
+    id: "none", title: "Margins only",
+    desc: "No reordering — just trim whitespace so the text prints larger.",
+    Diagram: MarginsDiagram,
+  },
+];
+
+const ASSEMBLY: Record<BindingChoice, string[]> = {
+  saddle: [
+    "Print double-sided on the chosen paper, landscape.",
+    "Stack the sheets in printed order, keeping them flat.",
+    "Fold the whole stack once down the middle.",
+    "Staple twice through the fold, then trim the fore-edge.",
+  ],
+  perfect: [
+    "Print double-sided on the chosen paper, landscape.",
+    "Cut every sheet down the middle line.",
+    "Put the right-hand pile underneath the left-hand pile.",
+    "Clamp the spine, roughen it, glue and let it cure.",
+  ],
+  none: [
+    "Print single- or double-sided as usual.",
+    "The page content is trimmed and scaled up to fill the paper.",
+  ],
+};
+
+/** Everything the UI needs to know about a build, minus the bytes themselves. */
+type OutputInfo = Omit<BuildResult, "bytes"> & { url: string };
+
+export default function App() {
+  const [file, setFile] = useState<{ name: string } | null>(null);
+  const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
+  // PDF bytes live in refs, never in state or props: React's development build
+  // serialises changed props onto its performance track, and a multi-megabyte
+  // typed array there throws DataCloneError mid-commit.
+  const source = useRef<Uint8Array | null>(null);
+  const built = useRef<Uint8Array | null>(null);
+  const [pageCount, setPageCount] = useState(0);
+  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const [detected, setDetected] = useState<{ perPage: Bounds[]; shared: Bounds } | null>(null);
+  const [crop, setCrop] = useState<Bounds>(FULL_PAGE);
+  const [scanning, setScanning] = useState(0); // 0-1 progress, 0 = idle
+  const [output, setOutput] = useState<OutputInfo | null>(null);
+  const [building, setBuilding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const buildId = useRef(0);
+
+  const set = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
+    setSettings((s) => ({ ...s, [key]: value }));
+  }, []);
+
+  /* ── loading a document ─────────────────────────────────────────────── */
+  const openFile = useCallback(async (f: File) => {
+    setError(null);
+    setOutput((old) => { if (old) URL.revokeObjectURL(old.url); return null; });
+    setDetected(null);
+    setCrop(FULL_PAGE);
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const d = await loadPdf(bytes);
+      source.current = bytes;
+      built.current = null;
+      setFile({ name: f.name });
+      setDoc((old) => { closePdf(old); return d; });
+      setPageCount(d.numPages);
+    } catch {
+      setError("That file could not be opened as a PDF.");
+    }
+  }, []);
+
+  const closeFile = useCallback(() => {
+    source.current = null;
+    built.current = null;
+    setFile(null);
+    setOutput((old) => { if (old) URL.revokeObjectURL(old.url); return null; });
+    setDoc((old) => { closePdf(old); return null; });
+    setPageCount(0);
+  }, []);
+
+  /** Draws a source page for the crop preview without exposing pdf.js as a prop. */
+  const renderSample = useCallback(async (canvas: HTMLCanvasElement, pageNumber: number) => {
+    if (!doc) return;
+    const page = await doc.getPage(Math.min(pageNumber, doc.numPages));
+    await renderPage(page, canvas, 150);
+    page.cleanup();
+  }, [doc]);
+
+  /* ── margin detection, once per document ───────────────────────────── */
+  useEffect(() => {
+    if (!doc) return;
+    const ac = new AbortController();
+    setScanning(0.001);
+    scanMargins(doc, (done, total) => setScanning(done / total), ac.signal)
+      .then((scan) => {
+        if (ac.signal.aborted) return;
+        setDetected(scan);
+        setCrop(scan.shared);
+      })
+      .catch(() => {})
+      .finally(() => !ac.signal.aborted && setScanning(0));
+    return () => ac.abort();
+  }, [doc]);
+
+  /* ── rebuild the booklet whenever anything changes ─────────────────── */
+  const activeCrop = useMemo<Bounds | Bounds[] | null>(() => {
+    if (!settings.cropEnabled) return null;
+    if (settings.uniformCrop || !detected) return crop;
+    return detected.perPage;
+  }, [settings.cropEnabled, settings.uniformCrop, crop, detected]);
+
+  useEffect(() => {
+    const bytes = source.current;
+    if (!file || !bytes) return;
+    const id = ++buildId.current;
+    const timer = setTimeout(async () => {
+      setBuilding(true);
+      try {
+        const { bytes: outBytes, ...info } = await buildBooklet(bytes, {
+          binding: settings.binding,
+          paperId: settings.paperId,
+          crop: activeCrop,
+          outerMargin: mm(settings.outerMargin),
+          gutter: mm(settings.gutter),
+          duplexFlip: settings.duplexFlip,
+          sheetsPerSignature: settings.sheetsPerSignature,
+          rtl: settings.rtl,
+          guideLine: settings.guideLine,
+          cropMarks: settings.cropMarks,
+        });
+        if (id === buildId.current) {
+          built.current = outBytes;
+          const url = URL.createObjectURL(
+            new Blob([outBytes as BlobPart], { type: "application/pdf" }));
+          setOutput((old) => { if (old) URL.revokeObjectURL(old.url); return { ...info, url }; });
+          setError(null);
+        }
+      } catch (e) {
+        if (id === buildId.current) {
+          setError(e instanceof Error ? e.message : "Could not build the booklet.");
+        }
+      } finally {
+        if (id === buildId.current) setBuilding(false);
+      }
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [file, settings, activeCrop]);
+
+  /* ── export ─────────────────────────────────────────────────────────── */
+  const exportPdf = useCallback(async () => {
+    const bytes = built.current;
+    if (!bytes || !file) return;
+    const suffix = settings.binding === "none" ? "trimmed" : `${settings.binding}-booklet`;
+    const name = `${file.name.replace(/\.pdf$/i, "")} — ${suffix}.pdf`;
+    const bridge = window.desktop;
+    if (bridge) {
+      const ok = await bridge.savePdf(name, bytes);
+      if (!ok) return;
+    } else {
+      const a = document.createElement("a");
+      a.href = output?.url ?? "";
+      a.download = name;
+      a.click();
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2200);
+  }, [output, file, settings.binding]);
+
+
+  const sheets = pageCount ? sheetsFor(pageCount) : 0;
+  const isBooklet = settings.binding !== "none";
+
+  if (!file) return <Landing onFile={openFile} error={error} />;
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <span className="brand"><Logo /> Perfect Binding</span>
+        <span className="file-chip">
+          <strong>{file.name}</strong>
+          <span className="dot">·</span>
+          <span>{pageCount} pages</span>
+          <button className="btn icon sm ghost" title="Close this file"
+            onClick={closeFile}>
+            ✕
+          </button>
+        </span>
+        <div className="spacer" />
+        <label className="btn sm" style={{ cursor: "pointer" }}>
+          Replace
+          <input type="file" accept="application/pdf,.pdf" hidden
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) openFile(f); e.target.value = ""; }} />
+        </label>
+        <button className="btn primary" onClick={exportPdf} disabled={!output || building}>
+          {saved ? "Saved ✓" : "Export PDF"}
+        </button>
+      </header>
+
+      <div className="body">
+        <aside className="sidebar">
+          {error && <div className="error">{error}</div>}
+
+          <section className="section">
+            <h2><span className="step">1</span> Binding</h2>
+            <div className="cards">
+              {BINDINGS.map(({ id, title, desc, Diagram }) => (
+                <button key={id} type="button" className="card" aria-pressed={settings.binding === id}
+                  onClick={() => set("binding", id)}>
+                  <figure><Diagram /></figure>
+                  <span>
+                    <span className="title">{title}</span>
+                    <span className="desc">{desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="section">
+            <h2><span className="step">2</span> Paper</h2>
+            <Field label="Sheet size"
+              hint={isBooklet ? "Sheets print landscape, two pages per side." : undefined}>
+              <Select value={settings.paperId} onChange={(v) => set("paperId", v)}
+                options={[...PAPER_SIZES.map((p) => ({ value: p.id, label: p.label })),
+                  { value: "source", label: "Match the source pages" }]} />
+            </Field>
+            <Field label="Outer margin" value={`${settings.outerMargin} mm`}>
+              <Slider min={0} max={25} value={settings.outerMargin}
+                onChange={(v) => set("outerMargin", v)} />
+            </Field>
+            {isBooklet && (
+              <Field label="Spine gutter" value={`${settings.gutter} mm`}
+                hint="Room for the fold or the glue, split between the two pages.">
+                <Slider min={0} max={40} value={settings.gutter} onChange={(v) => set("gutter", v)} />
+              </Field>
+            )}
+          </section>
+
+          <section className="section">
+            <h2><span className="step">3</span> Margins</h2>
+            <Field label="">
+              <Switch label="Trim page margins"
+                sub={scanning ? "Measuring content…" : detected ? "Content measured automatically" : "Detects the printed area"}
+                checked={settings.cropEnabled} onChange={(v) => set("cropEnabled", v)} />
+            </Field>
+            {scanning > 0 && (
+              <div className="progress" style={{ marginBottom: 12 }}>
+                <i style={{ width: `${Math.round(scanning * 100)}%` }} />
+              </div>
+            )}
+            {settings.cropEnabled && (
+              <>
+                <Field label="">
+                  <Switch label="Same crop for every page"
+                    sub={settings.uniformCrop ? "One box, safest for books" : "Each page trimmed on its own"}
+                    checked={settings.uniformCrop} onChange={(v) => set("uniformCrop", v)}
+                    disabled={!detected} />
+                </Field>
+                {settings.uniformCrop && (
+                  <CropPanel renderSample={renderSample} pageNumber={Math.min(2, pageCount)} crop={crop}
+                    detected={detected?.shared ?? null} onChange={setCrop}
+                    onReset={() => setCrop(detected?.shared ?? FULL_PAGE)} />
+                )}
+              </>
+            )}
+          </section>
+
+          {isBooklet && (
+            <section className="section">
+              <h2><span className="step">4</span> Printing</h2>
+              <Field label="Duplex flip"
+                hint="If the back of a sheet comes out upside down, switch this.">
+                <Segmented value={settings.duplexFlip} onChange={(v) => set("duplexFlip", v)}
+                  options={[
+                    { value: "short", label: "Short edge" },
+                    { value: "long", label: "Long edge" },
+                  ]} />
+              </Field>
+              {settings.binding === "saddle" && (
+                <Field label="Signature size"
+                  value={settings.sheetsPerSignature === 0 ? "one booklet" : `${settings.sheetsPerSignature} sheets`}
+                  hint="Thick books fold badly. Split them into signatures, then bind the signatures together.">
+                  <Slider min={0} max={12} value={settings.sheetsPerSignature}
+                    onChange={(v) => set("sheetsPerSignature", v)} />
+                </Field>
+              )}
+              <Field label="">
+                <Switch label={settings.binding === "saddle" ? "Fold line" : "Cut line"}
+                  sub="Dashed guide down the middle of the sheet"
+                  checked={settings.guideLine} onChange={(v) => set("guideLine", v)} />
+              </Field>
+              <Field label="">
+                <Switch label="Trim marks" sub="Corner marks for cutting the fore-edge"
+                  checked={settings.cropMarks} onChange={(v) => set("cropMarks", v)} />
+              </Field>
+              <Field label="">
+                <Switch label="Right-to-left" sub="Arabic, Hebrew, Japanese"
+                  checked={settings.rtl} onChange={(v) => set("rtl", v)} />
+              </Field>
+            </section>
+          )}
+
+          <section className="section">
+            <h2>How to assemble</h2>
+            <ol className="hint" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+              {ASSEMBLY[settings.binding].map((s) => <li key={s}>{s}</li>)}
+            </ol>
+          </section>
+        </aside>
+
+        <main>
+          <Preview src={output?.url ?? null} layout={output?.layout ?? []}
+            binding={settings.binding} busy={building} sheetCount={output?.sheets ?? sheets} />
+          <div className="stats">
+            <Stat k="Source" v={`${pageCount} pages`} />
+            {isBooklet ? (
+              <>
+                <Stat k="Sheets of paper" v={`${output?.sheets ?? sheets}`} />
+                <Stat k="Printed sides" v={`${output?.pages ?? sheets * 2}`} />
+                <Stat k="Blank slots" v={`${output?.blanks ?? blankCount(pageCount)}`} />
+                <Stat k="Duplex" v={settings.duplexFlip === "short" ? "Flip short edge" : "Flip long edge"} />
+              </>
+            ) : (
+              <Stat k="Output pages" v={`${output?.pages ?? pageCount}`} />
+            )}
+            {settings.cropEnabled && (
+              <Stat k="Trimmed" v={settings.uniformCrop
+                ? `${Math.round((crop.left + crop.right) * 100)}% wide, ${Math.round((crop.top + crop.bottom) * 100)}% tall`
+                : "per page"} />
+            )}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ k, v }: { k: string; v: string }) {
+  return <div className="stat"><span className="k">{k}</span><span className="v">{v}</span></div>;
+}
+
+function Landing({ onFile, error }: { onFile: (f: File) => void; error: string | null }) {
+  return (
+    <div className="app">
+      <header className="topbar"><span className="brand"><Logo /> Perfect Binding</span></header>
+      <div className="empty">
+        <div className="empty-inner">
+          <h1>Turn any PDF into a booklet</h1>
+          <p className="lede">
+            Reorder pages for stitched or perfect binding, trim dead margins so the text
+            prints larger, and check every sheet before you print.
+          </p>
+          <Dropzone onFile={onFile} />
+          {error && <div className="error" style={{ marginTop: 16 }}>{error}</div>}
+          <div className="explainer">
+            {BINDINGS.map(({ id, title, desc, Diagram }) => (
+              <div key={id}>
+                <Diagram width={96} height={64} />
+                <div className="name">{title}</div>
+                <div className="what">{desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Logo() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5.5C10 3.8 6.6 3.4 4 4v14c2.6-.6 6-.2 8 1.5 2-1.7 5.4-2.1 8-1.5V4c-2.6-.6-6-.2-8 1.5Z"
+        stroke="var(--accent)" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M12 5.5v14" stroke="var(--accent)" strokeWidth="1.6" />
+    </svg>
+  );
+}
