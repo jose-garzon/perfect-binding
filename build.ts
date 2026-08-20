@@ -21,5 +21,9 @@ if (!result.success) {
 
 await cp("node_modules/pdfjs-dist/build/pdf.worker.min.mjs", "dist/pdf.worker.min.mjs");
 
+// The @font-face rules are declared in index.html, outside the bundler's reach,
+// so the files have to be carried over by hand. See src/renderer/index.html.
+await cp("src/renderer/fonts", "dist/fonts", { recursive: true });
+
 const bytes = result.outputs.reduce((n, o) => n + o.size, 0);
 console.log(`Built ${result.outputs.length} files → dist/ (${(bytes / 1e6).toFixed(1)} MB)`);

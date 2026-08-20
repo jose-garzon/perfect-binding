@@ -1,8 +1,8 @@
 interface Props { width?: number; height?: number }
 
 const ink = "var(--ink-2)";
-const faint = "var(--line-strong)";
-const accent = "var(--accent)";
+const faint = "var(--rule-strong)";
+const accent = "var(--spot)";
 
 /** Nested folded sheets, stapled through the spine. */
 export function SaddleDiagram({ width = 76, height = 56 }: Props) {
@@ -26,7 +26,7 @@ export function SaddleDiagram({ width = 76, height = 56 }: Props) {
       })}
       <path d="M38 12 L38 44" stroke={faint} strokeWidth="1" strokeDasharray="3 3" />
       {[18, 28, 38].map((y) => (
-        <rect key={y} x="35" y={y} width="6" height="2.4" rx="1.2" fill={accent} />
+        <rect key={y} x="35" y={y} width="6" height="2.4" fill={accent} />
       ))}
     </svg>
   );
@@ -47,7 +47,7 @@ export function FoldedDiagram({ width = 76, height = 56 }: Props) {
           />
         );
       })}
-      <rect x="10" y="8" width="4" height="42" rx="2" fill={accent} opacity=".9" />
+      <rect x="10" y="8" width="4" height="42" fill={accent} opacity=".9" />
     </svg>
   );
 }
@@ -56,7 +56,7 @@ export function FoldedDiagram({ width = 76, height = 56 }: Props) {
 export function PerfectDiagram({ width = 76, height = 56 }: Props) {
   return (
     <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true">
-      <rect x="10" y="8" width="8" height="40" rx="2" fill={accent} opacity=".85" />
+      <rect x="10" y="8" width="8" height="40" fill={accent} opacity=".85" />
       {[0, 1, 2, 3, 4, 5].map((i) => (
         <line
           key={i}
@@ -74,9 +74,9 @@ export function PerfectDiagram({ width = 76, height = 56 }: Props) {
 export function MarginsDiagram({ width = 76, height = 56 }: Props) {
   return (
     <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true">
-      <rect x="14" y="5" width="48" height="46" rx="3"
+      <rect x="14" y="5" width="48" height="46"
         fill="var(--surface)" stroke={faint} strokeWidth="1.2" />
-      <rect x="23" y="14" width="30" height="28" rx="1.5"
+      <rect x="23" y="14" width="30" height="28"
         stroke={accent} strokeWidth="1.4" strokeDasharray="3.5 2.5" />
       {[18, 23, 28, 33, 38].map((y, i) => (
         <line key={y} x1="26" y1={y} x2={i === 4 ? 42 : 50} y2={y}
@@ -94,18 +94,20 @@ export function SheetDiagram({ binding }: { binding: "saddle" | "folded" | "perf
   const folds = binding !== "perfect";
   return (
     <svg width="74" height="42" viewBox="0 0 74 42" fill="none" aria-hidden="true">
-      <rect x="5" y="3" width="64" height="26" rx="2"
+      <rect x="5" y="3" width="64" height="26"
         fill="var(--surface)" stroke={faint} strokeWidth="1.1" />
       <line x1="37" y1="1" x2="37" y2="31" stroke={accent} strokeWidth="1.2"
         strokeDasharray={folds ? "4 3" : "0"} />
       {binding === "perfect" && (
         <>
           <path d="M37 1 L34 5 M37 1 L40 5" stroke={accent} strokeWidth="1.2" strokeLinecap="round" />
-          <text x="37" y="39" fill="var(--ink-3)" fontSize="8" textAnchor="middle">cut here</text>
+          <text x="37" y="39" fill="var(--ink-3)" fontSize="7" letterSpacing="1"
+            textAnchor="middle">CUT</text>
         </>
       )}
       {folds && (
-        <text x="37" y="39" fill="var(--ink-3)" fontSize="8" textAnchor="middle">fold here</text>
+        <text x="37" y="39" fill="var(--ink-3)" fontSize="7" letterSpacing="1"
+          textAnchor="middle">FOLD</text>
       )}
     </svg>
   );

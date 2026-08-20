@@ -3,12 +3,17 @@ import type { ReactNode } from "react";
 export function Field({ label, value, children, hint }: {
   label: string; value?: ReactNode; children: ReactNode; hint?: ReactNode;
 }) {
+  // A switch supplies its own label, so the header row is dropped entirely
+  // rather than left as an empty line taking up space.
+  const header = label !== "" || value !== undefined;
   return (
     <div className="field">
-      <div className="field-label">
-        <span>{label}</span>
-        {value !== undefined && <span className="value">{value}</span>}
-      </div>
+      {header && (
+        <div className="field-label">
+          <span>{label}</span>
+          {value !== undefined && <span className="value">{value}</span>}
+        </div>
+      )}
       {children}
       {hint && <p className="hint">{hint}</p>}
     </div>
@@ -38,7 +43,7 @@ export function Switch({ label, sub, checked, onChange, disabled }: {
     <label className="switch" style={disabled ? { opacity: .5 } : undefined}>
       <span>
         <span className="label">{label}</span>
-        {sub && <><br /><span className="sub">{sub}</span></>}
+        {sub && <span className="sub">{sub}</span>}
       </span>
       <input type="checkbox" checked={checked} disabled={disabled}
         onChange={(e) => onChange(e.target.checked)} />

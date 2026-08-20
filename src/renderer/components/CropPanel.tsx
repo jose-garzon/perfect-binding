@@ -43,9 +43,9 @@ export function CropPanel({ renderSample, pageNumber, crop, onChange, onReset, d
           <div className="crop-box" style={box} />
         </div>
       </div>
-      <p className="hint" style={{ marginBottom: 12 }}>
+      <p className="hint" style={{ marginBottom: 18 }}>
         {detected
-          ? "Detected content is boxed in green. Nudge any edge if it clips something."
+          ? "The detected content is boxed. Nudge any edge if it clips something."
           : "Set each edge by hand."}
       </p>
       <div className="mini-grid">
@@ -57,7 +57,7 @@ export function CropPanel({ renderSample, pageNumber, crop, onChange, onReset, d
         ))}
       </div>
       <button className="btn sm ghost" type="button" onClick={onReset}
-        style={{ marginTop: 4, paddingLeft: 0 }}>
+        style={{ marginTop: 10, paddingLeft: 0 }}>
         {detected ? "Reset to detected" : "Clear"}
       </button>
     </>

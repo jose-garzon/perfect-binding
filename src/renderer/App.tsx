@@ -257,19 +257,25 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <span className="brand"><Logo /> Perfect Binding</span>
-        <span className="file-chip">
+      <header className="masthead">
+        <Wordmark />
+        <span className="folio-line">
           <strong>{file.name}</strong>
-          <span className="dot">·</span>
+          <span className="rule-v" />
           <span>{pageCount} pages</span>
-          <button className="btn icon sm ghost" title="Close this file"
-            onClick={closeFile}>
-            ✕
+          <button className="btn ghost sm" title="Close this file" onClick={closeFile}>
+            Close
           </button>
         </span>
         <div className="spacer" />
-        <label className="btn sm" style={{ cursor: "pointer" }}>
+        {/* A label wrapping a hidden input is not focusable, so the control is
+            given a button's role and keyboard activation of its own. */}
+        <label className="btn sm" style={{ cursor: "pointer" }} role="button" tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            e.currentTarget.querySelector("input")?.click();
+          }}>
           Replace
           <input type="file" accept="application/pdf,.pdf" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) openFile(f); e.target.value = ""; }} />
@@ -280,11 +286,11 @@ export default function App() {
       </header>
 
       <div className="body">
-        <aside className="sidebar">
+        <aside className="column">
           {error && <div className="error">{error}</div>}
 
           <section className="section">
-            <h2><span className="step">1</span> Binding</h2>
+            <h2><span className="step">01</span>Binding</h2>
             <div className="cards">
               {BINDINGS.map(({ id, title, desc, Diagram }) => (
                 <button key={id} type="button" className="card" aria-pressed={settings.binding === id}
@@ -300,7 +306,7 @@ export default function App() {
           </section>
 
           <section className="section">
-            <h2><span className="step">2</span> Paper</h2>
+            <h2><span className="step">02</span>Paper</h2>
             <Field label="Sheet size"
               hint={isBooklet ? "Sheets print landscape, two pages per side." : undefined}>
               <Select value={settings.paperId} onChange={(v) => set("paperId", v)}
@@ -320,14 +326,14 @@ export default function App() {
           </section>
 
           <section className="section">
-            <h2><span className="step">3</span> Margins</h2>
+            <h2><span className="step">03</span>Margins</h2>
             <Field label="">
               <Switch label="Trim page margins"
                 sub={scanning ? "Measuring content…" : detected ? "Content measured automatically" : "Detects the printed area"}
                 checked={settings.cropEnabled} onChange={(v) => set("cropEnabled", v)} />
             </Field>
             {scanning > 0 && (
-              <div className="progress" style={{ marginBottom: 12 }}>
+              <div className="progress" style={{ marginBottom: 18 }}>
                 <i style={{ width: `${Math.round(scanning * 100)}%` }} />
               </div>
             )}
@@ -350,7 +356,7 @@ export default function App() {
 
           {isBooklet && (
             <section className="section">
-              <h2><span className="step">4</span> Printing</h2>
+              <h2><span className="step">04</span>Printing</h2>
               <Field label="Duplex flip"
                 hint="If the back of a sheet comes out upside down, switch this.">
                 <Segmented value={settings.duplexFlip} onChange={(v) => set("duplexFlip", v)}
@@ -360,7 +366,7 @@ export default function App() {
                   ]} />
               </Field>
               {settings.binding === "folded" && (
-                <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+                <p className="hint" style={{ marginBottom: 18 }}>
                   Each sheet holds 4 pages and is folded by itself, so the spine stays
                   square however long the document is.
                 </p>
@@ -391,7 +397,7 @@ export default function App() {
 
           <section className="section">
             <h2>How to assemble</h2>
-            <ol className="hint" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+            <ol>
               {ASSEMBLY[settings.binding].map((s) => <li key={s}>{s}</li>)}
             </ol>
           </section>
@@ -400,7 +406,7 @@ export default function App() {
         <main>
           <Preview src={output?.url ?? null} layout={output?.layout ?? []}
             binding={settings.binding} busy={building} sheetCount={output?.sheets ?? sheets} />
-          <div className="stats">
+          <div className="colophon">
             <Stat k="Source" v={`${pageCount} pages`} />
             {isBooklet ? (
               <>
@@ -428,20 +434,43 @@ function Stat({ k, v }: { k: string; v: string }) {
   return <div className="stat"><span className="k">{k}</span><span className="v">{v}</span></div>;
 }
 
+/**
+ * The cover: a display headline and standfirst on the left, the dropzone as a
+ * plate on the right, and the four methods below as a directory of hairline
+ * cells — the reference magazine's directory spread.
+ */
 function Landing({ onFile, error }: { onFile: (f: File) => void; error: string | null }) {
   return (
     <div className="app">
-      <header className="topbar"><span className="brand"><Logo /> Perfect Binding</span></header>
-      <div className="empty">
-        <div className="empty-inner">
-          <h1>Turn any PDF into a booklet</h1>
-          <p className="lede">
-            Reorder pages for stitched, folded, or perfect binding, trim dead margins so
-            the text prints larger, and check every sheet before you print.
-          </p>
-          <Dropzone onFile={onFile} />
-          {error && <div className="error" style={{ marginTop: 16 }}>{error}</div>}
-          <div className="explainer">
+      <header className="masthead">
+        <Wordmark />
+        <div className="spacer" />
+        <span className="folio-line">Runs entirely on this machine</span>
+      </header>
+
+      <div className="cover">
+        <div className="cover-inner">
+          <div className="spread">
+            <div>
+              <p className="kicker">Booklet imposition · Margin trimming · Offline</p>
+              <h1>Turn any PDF<br />into a <em>booklet</em></h1>
+              <p className="standfirst">
+                Reorder pages for stitched, folded, or perfect binding, trim dead
+                margins so the text prints larger, and check every sheet before you
+                print.
+              </p>
+            </div>
+            <div>
+              <Dropzone onFile={onFile} />
+              {error && <div className="error">{error}</div>}
+            </div>
+          </div>
+
+          <div className="directory-head">
+            <h2>Binding directory</h2>
+            <p>Four ways to turn a stack of paper into a book</p>
+          </div>
+          <div className="directory">
             {BINDINGS.map(({ id, title, desc, Diagram }) => (
               <div key={id}>
                 <Diagram width={96} height={64} />
@@ -450,18 +479,36 @@ function Landing({ onFile, error }: { onFile: (f: File) => void; error: string |
               </div>
             ))}
           </div>
+
+          <div className="cover-foot">
+            <div className="imprint">
+              Perfect Binding<br />
+              Imposition, trimming, and a sheet-by-sheet proof<br />
+              The PDF never leaves this computer
+            </div>
+            <div className="folio-mark" aria-hidden="true">04</div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+function Wordmark() {
+  return (
+    <span className="wordmark">
+      <Logo /> Perfect Binding<span className="star">*</span>
+    </span>
+  );
+}
+
+/** A folded signature seen end-on, with the spine marked in the spot colour. */
 function Logo() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 5.5C10 3.8 6.6 3.4 4 4v14c2.6-.6 6-.2 8 1.5 2-1.7 5.4-2.1 8-1.5V4c-2.6-.6-6-.2-8 1.5Z"
-        stroke="var(--accent)" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M12 5.5v14" stroke="var(--accent)" strokeWidth="1.6" />
+    <svg width="22" height="18" viewBox="0 0 22 18" fill="none" aria-hidden="true">
+      <path d="M11 3.4C8.6 1.6 4.8 1.2 1.2 2v13.4c3.6-.8 7.4-.4 9.8 1.4 2.4-1.8 6.2-2.2 9.8-1.4V2c-3.6-.8-7.4-.4-9.8 1.4Z"
+        stroke="var(--ink)" strokeWidth="1.1" strokeLinejoin="round" />
+      <path d="M11 3.4v13.4" stroke="var(--spot)" strokeWidth="1.4" />
     </svg>
   );
 }

@@ -20,12 +20,12 @@ export function Dropzone({ onFile }: { onFile: (file: File) => void }) {
       onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files); }}
     >
-      <svg width="34" height="34" viewBox="0 0 24 24" fill="none"
-        stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
-        <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none"
+        stroke="var(--ink)" strokeWidth="1.2" strokeLinecap="square" strokeLinejoin="miter">
+        <path d="M12 15V4m0 0L8 8M12 4l4 4" />
+        <path d="M4 14v5h16v-5" />
       </svg>
-      <span className="big">Drop a PDF here</span>
+      <span className="big">Drop a PDF</span>
       <span className="small">or click to choose a file — nothing leaves your computer</span>
       <input ref={input} type="file" accept="application/pdf,.pdf" hidden
         onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />

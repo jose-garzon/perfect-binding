@@ -65,7 +65,7 @@ the margin work). If the backs of your sheets come out upside down, flip the
 *Duplex flip* setting between short edge and long edge; that rotates the back
 sides 180° in the exported file.
 
-## Two things worth knowing before changing the renderer
+## Three things worth knowing before changing the renderer
 
 **PDF bytes never travel through React state or props.** React's development
 build diffs changed props onto its performance track via `performance.measure`,
@@ -73,6 +73,15 @@ and a multi-megabyte `Uint8Array` there throws `DataCloneError: … out of memor
 and then corrupts the commit phase (`Should not already be working`). Bytes live
 in refs; the preview receives a `blob:` URL and pdf.js objects are reached
 through callbacks. `bun run smoke:dev` fails if this regresses.
+
+**Fonts are bundled, and their @font-face rules live in `index.html`.** The
+Electron CSP is `default-src 'self'` with no `font-src`, so nothing may be
+fetched from a CDN — and a `data:` font is blocked just as firmly, which matters
+because Bun's CSS bundler silently inlines any small asset it can resolve from a
+stylesheet. Declaring the faces in an inline `<style>` in `index.html` keeps them
+out of the bundler's reach: the paths pass through untouched, `build.ts` copies
+the files into `dist/fonts/`, and `server.ts` serves them in dev. Any future
+typeface has to follow the same route.
 
 **Canvas renders are cancelled, not stacked.** pdf.js refuses to paint a canvas
 that is already being painted, which React Strict Mode triggers constantly.
@@ -88,6 +97,7 @@ src/core/         pure logic, no DOM — unit tested
   paper.ts        paper sizes in points
 src/renderer/     React UI (no framework beyond React + hand-written CSS)
   lib/pdf.ts      pdf.js loading, page rendering, margin scanning
+  fonts/          Archivo and Newsreader, Latin subsets, SIL OFL (see OFL.txt)
 electron/         main, preload, and the CSP applied as a response header
 scripts/          dev launcher and the end-to-end smoke test
 ```

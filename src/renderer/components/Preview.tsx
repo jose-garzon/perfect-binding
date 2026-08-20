@@ -40,7 +40,7 @@ export function Preview({ src, layout, binding, busy, sheetCount }: {
     const el = stage.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      const w = entry!.contentRect.width - 64;
+      const w = entry!.contentRect.width - 96;
       setWidth(Math.max(280, Math.min(1080, w)));
     });
     ro.observe(el);
@@ -54,7 +54,7 @@ export function Preview({ src, layout, binding, busy, sheetCount }: {
       const page = await doc.getPage(index + 1);
       if (cancelled || !canvas.current) return;
       const vp = page.getViewport({ scale: 1 });
-      const maxByHeight = (stage.current?.clientHeight ?? 700) - 72;
+      const maxByHeight = (stage.current?.clientHeight ?? 700) - 96;
       const fit = Math.min(width, (maxByHeight * vp.width) / vp.height);
       await renderPage(page, canvas.current, Math.max(240, fit));
       page.cleanup();
@@ -77,11 +77,20 @@ export function Preview({ src, layout, binding, busy, sheetCount }: {
 
   return (
     <section className="preview">
-      <div className="preview-bar">
-        <button className="btn icon sm" onClick={() => step(-1)} disabled={index === 0}
-          aria-label="Previous sheet side">‹</button>
-        <button className="btn icon sm" onClick={() => step(1)} disabled={index >= total - 1}
-          aria-label="Next sheet side">›</button>
+      <div className="plate" ref={stage}>
+        <div className={`sheet${busy ? "" : " turning"}`} key={index}>
+          <canvas ref={canvas} />
+          {binding !== "perfect" && binding !== "none" && <span className="fold" />}
+        </div>
+      </div>
+
+      <div className="caption">
+        <div className="nav">
+          <button className="btn icon" onClick={() => step(-1)} disabled={index === 0}
+            aria-label="Previous sheet side">‹</button>
+          <button className="btn icon" onClick={() => step(1)} disabled={index >= total - 1}
+            aria-label="Next sheet side">›</button>
+        </div>
         <div className="sheet-label">
           {binding === "none"
             ? <>Page {index + 1} <span>of {total}</span></>
@@ -93,13 +102,6 @@ export function Preview({ src, layout, binding, busy, sheetCount }: {
         <div className="spacer" />
         {busy && <span className="busy"><i className="spinner" />Rebuilding…</span>}
         <SheetDiagram binding={binding} />
-      </div>
-
-      <div className="stage" ref={stage}>
-        <div className={`sheet${busy ? "" : " turning"}`} key={index}>
-          <canvas ref={canvas} />
-          {binding !== "perfect" && binding !== "none" && <span className="fold" />}
-        </div>
       </div>
     </section>
   );
