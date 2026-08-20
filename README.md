@@ -1,3 +1,5 @@
+<img src="assets/icons/128x128.png" width="88" alt="">
+
 # Perfect Binding
 
 Desktop app that turns a PDF into a print-ready booklet. Reorders pages for
@@ -7,14 +9,60 @@ export.
 
 Everything runs locally — the PDF never leaves the machine.
 
-## Run it
+![The landing view: drop a PDF, or read the binding directory first](assets/screenshots/home.png)
+
+## Features
+
+- **Four ways to bind.** Stitched (saddle), folded & glued, perfect binding, or
+  margins-only with no reordering at all. Each one is explained in the app, in
+  the [section below](#what-the-four-modes-do), and drawn on the card you pick.
+- **Automatic margin trimming.** Every page is scanned for its content box, the
+  results are merged across the document, and the crop is scaled back up to fill
+  the sheet. Nudge any edge by hand if the detector clips something.
+- **A sheet-by-sheet proof.** Step through every sheet, front and back, with the
+  fold line or the cut line drawn where it will fall — before you spend paper.
+- **The numbers that decide the print job.** Sheets of paper, printed sides,
+  blank slots, duplex flip, and how much was trimmed, kept in view at all times.
+- **Paper and spine controls.** A4, Letter, Legal, A3, Tabloid, or A5; outer
+  margin and spine gutter in millimetres; signature size for thick
+  saddle-stitched books that would otherwise fold badly at the fore-edge.
+- **Offline by construction.** No network calls, no telemetry, no upload step.
+  The Electron shell runs under `default-src 'self'`.
+
+![The working view: binding cards, paper controls, and the sheet proof](assets/screenshots/editing.png)
+
+Margin trimming on, with the detected content box and the four edge nudges:
+
+![The margins panel with the detected crop box](assets/screenshots/trim.png)
+
+## Install
+
+Prebuilt installers are attached to every release —
+**[latest release →](https://github.com/jose-garzon/perfect-binding/releases/latest)**
+
+**Linux** — download the AppImage, make it executable, run it:
+
+```bash
+chmod +x PerfectBinding-*-linux-x86_64.AppImage
+./PerfectBinding-*-linux-x86_64.AppImage
+```
+
+Or install the `.deb`: `sudo apt install ./PerfectBinding-*-linux-amd64.deb`
+
+**Windows** — run `PerfectBinding-<version>-win-x64.exe`. The build is unsigned,
+so SmartScreen warns on first launch: *More info → Run anyway*.
+
+**macOS** — open the `.dmg` (`-arm64` for Apple silicon, `-x64` for Intel) and
+drag the app to Applications. Also unsigned, so the first launch needs
+right-click → *Open* rather than a double-click.
+
+## Build it from source
 
 ```bash
 bun install
 bun run dev        # dev server + Electron window, hot reloading
+bun run package    # installers for this platform into release/
 ```
-
-Other scripts:
 
 | Script | What it does |
 | --- | --- |
@@ -26,6 +74,8 @@ Other scripts:
 | `bun test` | Unit tests for the imposition, crop, and PDF-building logic |
 | `bun run smoke` | Launches the packaged app, drops a 3 MB generated PDF on it, asserts a sheet renders and the CSP holds |
 | `bun run smoke:dev` | Same checks against a running `bun run web` dev server (React development build) |
+| `bun run shots` | Re-captures the screenshots in this README |
+| `bun run icon` | Re-renders the app icon PNGs from `assets/icon.svg` |
 | `bun run typecheck` | `tsc --noEmit` |
 
 ## What the four modes do
@@ -99,5 +149,32 @@ src/renderer/     React UI (no framework beyond React + hand-written CSS)
   lib/pdf.ts      pdf.js loading, page rendering, margin scanning
   fonts/          Archivo and Newsreader, Latin subsets, SIL OFL (see OFL.txt)
 electron/         main, preload, and the CSP applied as a response header
-scripts/          dev launcher and the end-to-end smoke test
+scripts/          dev launcher, icon rasteriser, screenshots, smoke test
+assets/           icon.svg (the source), its PNGs, and the README screenshots
 ```
+
+The app icon is drawn once in `assets/icon.svg` — a magazine standing cover-out,
+spine toward the viewer, in the same paper/ink/terracotta palette as the UI.
+Edit that file and run `bun run icon` to re-render every PNG size.
+
+## Releasing
+
+`.github/workflows/ci.yml` runs typecheck, tests, and the renderer build on
+every push and PR. `.github/workflows/release.yml` cuts the binaries:
+
+```bash
+# bump "version" in package.json first
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The tag fans out to Linux, Windows, and macOS runners, each running
+`bun run build` + `electron-builder`, and the installers are uploaded to a
+GitHub release for that tag. Re-running the workflow re-uploads over the same
+release. It can also be started by hand from the Actions tab with a tag name
+(`workflow_dispatch`); the tag must already exist.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). The bundled typefaces are under the SIL Open Font
+Licence; see `src/renderer/fonts/OFL.txt`.

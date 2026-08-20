@@ -12,6 +12,8 @@ function createWindow() {
     minWidth: 940,
     minHeight: 620,
     backgroundColor: "#f7f6f3",
+    // Linux and Windows read the window icon from here; macOS uses the bundle's.
+    icon: path.join(__dirname, "..", "assets", "icons", "512x512.png"),
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     show: false,
     webPreferences: {

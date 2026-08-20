@@ -4,25 +4,26 @@
   "type": "module",
   "private": true,
   "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
     "@types/bun": "latest",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
-    "bun-plugin-tailwind": "^0.1.2",
-    "concurrently": "^10.0.5",
-    "electron": "^43.4.1",
-    "electron-builder": "^26.15.3",
-    "tailwindcss": "^4.3.3"
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "bun-plugin-tailwind": "0.1.2",
+    "concurrently": "10.0.5",
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "tailwindcss": "4.3.3"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "5"
   },
   "dependencies": {
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^6.2.108",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.2.108",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Turn any PDF into a print-ready booklet: saddle stitch, perfect binding, margin trimming.",
   "main": "electron/main.cjs",
   "scripts": {
@@ -36,7 +37,9 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "smoke": "bun run build && electron scripts/smoke.cjs",
-    "smoke:dev": "PB_DEV_URL=http://localhost:${PORT:-3123} electron scripts/smoke.cjs"
+    "smoke:dev": "PB_DEV_URL=http://localhost:${PORT:-3123} electron scripts/smoke.cjs",
+    "icon": "bun run scripts/icon.ts",
+    "shots": "bun run build && electron scripts/shots.cjs"
   },
   "build": {
     "appId": "dev.perfectbinding.app",
@@ -44,17 +47,20 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "assets/icons/**/*",
       "package.json"
     ],
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "assets"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Office"
+      "category": "Office",
+      "syncDesktopName": true
     },
     "win": {
       "target": [
@@ -66,6 +72,18 @@
         "dmg"
       ],
       "category": "public.app-category.productivity"
-    }
-  }
+    },
+    "artifactName": "PerfectBinding-${version}-${os}-${arch}.${ext}"
+  },
+  "author": {
+    "name": "Jose Garzon",
+    "email": "jd.garzon12@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jose-garzon/perfect-binding.git"
+  },
+  "homepage": "https://github.com/jose-garzon/perfect-binding",
+  "license": "MIT",
+  "desktopName": "perfect-binding.desktop"
 }

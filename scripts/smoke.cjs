@@ -6,33 +6,11 @@
 const { app, BrowserWindow } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
-const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { applyCsp } = require("../electron/csp.cjs");
+const { samplePdf } = require("./sample-pdf.cjs");
 
 const OUT = process.env.PB_SMOKE_OUT || "/tmp/pb-smoke.png";
 const errors = [];
-
-/**
- * A deliberately chunky document: the renderer must never route PDF bytes
- * through React props, so a few megabytes here catches that regression.
- */
-async function samplePdf(n = 40) {
-  const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.TimesRoman);
-  for (let i = 1; i <= n; i++) {
-    const page = doc.addPage([595.28, 841.89]);
-    page.drawText(`Chapter page ${i}`, { x: 150, y: 620, size: 26, font });
-    for (let l = 0; l < 26; l++) {
-      page.drawText("The quick brown fox jumps over the lazy dog, again and again.",
-        { x: 150, y: 580 - l * 20, size: 11, font, color: rgb(0.15, 0.15, 0.15) });
-    }
-  }
-  // Padding keeps the file in the megabytes, which is where a PDF routed
-  // through React props starts breaking the development build.
-  const filler = require("node:crypto").randomBytes(3 * 1024 * 1024); // incompressible
-  await doc.attach(filler, "filler.bin", { mimeType: "application/octet-stream" });
-  return doc.save();
-}
 
 app.commandLine.appendSwitch("disable-gpu-compositing");
 

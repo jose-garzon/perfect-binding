@@ -1,90 +1,118 @@
+/* One drawing system for all five figures: every binding is shown end-on, as
+   the cross-section you would see looking down the spine, on a shared 76×56
+   stage. Paper is a filled surface with a hairline edge, the outermost sheet
+   carries the darker stroke, and the spot colour is spent on one thing only —
+   whatever actually holds the book together (staples, glue, the trim). */
+
 interface Props { width?: number; height?: number }
 
 const ink = "var(--ink-2)";
 const faint = "var(--rule-strong)";
 const accent = "var(--spot)";
+const paper = "var(--surface)";
 
-/** Nested folded sheets, stapled through the spine. */
-export function SaddleDiagram({ width = 76, height = 56 }: Props) {
+const HAIR = 1.15;
+
+function Stage({ width = 76, height = 56, children }: Props & { children: React.ReactNode }) {
   return (
-    <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true">
-      {[0, 1, 2].map((i) => {
-        const o = i * 5;
-        return (
-          <path
-            key={i}
-            d={`M38 ${12 + o} C 30 ${6 + o}, 16 ${5 + o}, 8 ${8 + o}
-                L8 ${40 - o} C 16 ${37 - o}, 30 ${38 - o}, 38 ${44 - o}
-                C 46 ${38 - o}, 60 ${37 - o}, 68 ${40 - o}
-                L68 ${8 + o} C 60 ${5 + o}, 46 ${6 + o}, 38 ${12 + o} Z`}
-            fill="var(--surface)"
-            stroke={i === 0 ? ink : faint}
-            strokeWidth="1.2"
-            strokeLinejoin="round"
-          />
-        );
-      })}
-      <path d="M38 12 L38 44" stroke={faint} strokeWidth="1" strokeDasharray="3 3" />
-      {[18, 28, 38].map((y) => (
-        <rect key={y} x="35" y={y} width="6" height="2.4" fill={accent} />
-      ))}
+    <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true"
+      strokeLinecap="round" strokeLinejoin="round">
+      {children}
+      {/* the press bed every figure rests on */}
+      <line x1="8" y1="52" x2="68" y2="52" stroke={faint} strokeWidth=".8" opacity=".55" />
     </svg>
+  );
+}
+
+/** One folded sheet seen end-on: two leaves meeting at the fold on the left. */
+function foldedSheet(fold: number, top: number, bottom: number, right: number) {
+  const mid = (top + bottom) / 2;
+  return `M${right} ${top}
+          L${fold + 7} ${top + 1}
+          Q ${fold} ${mid}, ${fold + 7} ${bottom - 1}
+          L${right} ${bottom}`;
+}
+
+/** Nested folded sheets, stapled through the common fold. */
+export function SaddleDiagram(props: Props) {
+  return (
+    <Stage {...props}>
+      {[0, 1, 2].map((i) => (
+        <path
+          key={i}
+          d={foldedSheet(14 + i * 2.5, 9 + i * 4.5, 47 - i * 4.5, 66 - i * 3.5)}
+          fill={i === 0 ? paper : "none"}
+          stroke={i === 0 ? ink : faint}
+          strokeWidth={HAIR}
+        />
+      ))}
+      {/* staples driven through every fold at once */}
+      {[21, 28, 35].map((y) => (
+        <rect key={y} x="14.8" y={y} width="6" height="2.8" rx="1.4" fill={accent} />
+      ))}
+    </Stage>
   );
 }
 
 /** Each sheet folded on its own, the folded sheets stacked and glued. */
-export function FoldedDiagram({ width = 76, height = 56 }: Props) {
+export function FoldedDiagram(props: Props) {
+  const tops = [8, 22, 36];
   return (
-    <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true">
-      {[0, 1, 2].map((i) => {
-        const top = 11 + i * 14;
-        return (
-          <path
-            key={i}
-            d={`M68 ${top} L20 ${top} C 10 ${top}, 10 ${top + 10}, 20 ${top + 10} L64 ${top + 10}`}
-            fill="none" stroke={i === 0 ? ink : faint} strokeWidth="1.5"
-            strokeLinecap="round" strokeLinejoin="round"
-          />
-        );
-      })}
-      <rect x="10" y="8" width="4" height="42" fill={accent} opacity=".9" />
-    </svg>
-  );
-}
-
-/** Loose leaves stacked flat, glued along the spine. */
-export function PerfectDiagram({ width = 76, height = 56 }: Props) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true">
-      <rect x="10" y="8" width="8" height="40" fill={accent} opacity=".85" />
-      {[0, 1, 2, 3, 4, 5].map((i) => (
-        <line
-          key={i}
-          x1="18" y1={11 + i * 7} x2={i % 2 ? 62 : 66} y2={11 + i * 7}
-          stroke={i < 2 ? ink : faint} strokeWidth="2.2" strokeLinecap="round"
+    <Stage {...props}>
+      {tops.map((top, i) => (
+        <path
+          key={top}
+          d={foldedSheet(16, top, top + 12, 64)}
+          fill={paper}
+          stroke={i === 0 ? ink : faint}
+          strokeWidth={HAIR}
         />
       ))}
-      <path d="M18 8 L66 8" stroke={ink} strokeWidth="1.2" />
-      <path d="M18 48 L66 48" stroke={ink} strokeWidth="1.2" />
-    </svg>
+      {/* glue beads down the folds — each sheet stuck to the next */}
+      {[14, 28, 42].map((y) => (
+        <circle key={y} cx="19.2" cy={y} r="2" fill={accent} />
+      ))}
+    </Stage>
   );
 }
 
-/** A page whose whitespace is trimmed away so the text prints larger. */
-export function MarginsDiagram({ width = 76, height = 56 }: Props) {
+/** Loose leaves, milled flat and glued into a wrap-around cover. */
+export function PerfectDiagram(props: Props) {
   return (
-    <svg width={width} height={height} viewBox="0 0 76 56" fill="none" aria-hidden="true">
-      <rect x="14" y="5" width="48" height="46"
-        fill="var(--surface)" stroke={faint} strokeWidth="1.2" />
-      <rect x="23" y="14" width="30" height="28"
-        stroke={accent} strokeWidth="1.4" strokeDasharray="3.5 2.5" />
-      {[18, 23, 28, 33, 38].map((y, i) => (
-        <line key={y} x1="26" y1={y} x2={i === 4 ? 42 : 50} y2={y}
-          stroke={ink} strokeWidth="1.8" strokeLinecap="round" opacity=".75" />
+    <Stage {...props}>
+      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        <line
+          key={i}
+          x1="19" y1={11 + i * 5} x2={i % 2 ? 62 : 65} y2={11 + i * 5}
+          stroke={faint} strokeWidth="1.4"
+        />
       ))}
-      <path d="M14 28 L22 28 M62 28 L54 28" stroke={accent} strokeWidth="1.2"
-        strokeLinecap="round" markerEnd="" />
-    </svg>
+      {/* the glue slab: what turns the loose leaves into a block */}
+      <path d="M18 9 L18 47" stroke={accent} strokeWidth="3.4" opacity=".9" />
+      {/* the cover, wrapped around that slab */}
+      <path d="M66 6 L21 6 C 13 6, 13 50, 21 50 L66 50" stroke={ink} strokeWidth={HAIR} fill="none" />
+    </Stage>
+  );
+}
+
+/** A page whose dead margin is trimmed away so the text prints larger. */
+export function MarginsDiagram(props: Props) {
+  return (
+    <Stage {...props}>
+      <rect x="15" y="5" width="46" height="42" rx="1"
+        fill={paper} stroke={faint} strokeWidth={HAIR} />
+      {[0, 1, 2, 3, 4].map((i) => (
+        <line key={i} x1="25" y1={16 + i * 5} x2={i === 4 ? 40 : 51} y2={16 + i * 5}
+          stroke={ink} strokeWidth="1.8" opacity=".7" />
+      ))}
+      {/* trim marks: where the margin gets cut off */}
+      <g stroke={accent} strokeWidth="1.3">
+        <path d="M22 9 L22 13 M22 9 L26 9" />
+        <path d="M54 9 L54 13 M54 9 L50 9" />
+        <path d="M22 43 L22 39 M22 43 L26 43" />
+        <path d="M54 43 L54 39 M54 43 L50 43" />
+      </g>
+    </Stage>
   );
 }
 
@@ -93,22 +121,26 @@ export function SheetDiagram({ binding }: { binding: "saddle" | "folded" | "perf
   if (binding === "none") return null;
   const folds = binding !== "perfect";
   return (
-    <svg width="74" height="42" viewBox="0 0 74 42" fill="none" aria-hidden="true">
-      <rect x="5" y="3" width="64" height="26"
-        fill="var(--surface)" stroke={faint} strokeWidth="1.1" />
+    <svg width="74" height="42" viewBox="0 0 74 42" fill="none" aria-hidden="true"
+      strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="3" width="64" height="26" rx="1"
+        fill="var(--surface)" stroke={faint} strokeWidth={HAIR} />
       <line x1="37" y1="1" x2="37" y2="31" stroke={accent} strokeWidth="1.2"
-        strokeDasharray={folds ? "4 3" : "0"} />
-      {binding === "perfect" && (
+        strokeDasharray={folds ? "4 3" : undefined} />
+      {folds ? (
+        /* the half that swings over onto the other */
+        <g stroke={accent} strokeWidth="1.2" fill="none">
+          <path d="M60 11 C 54 5, 44 5, 38 11" />
+          <path d="M38 11 L42 10 M38 11 L41 14" />
+        </g>
+      ) : (
         <>
-          <path d="M37 1 L34 5 M37 1 L40 5" stroke={accent} strokeWidth="1.2" strokeLinecap="round" />
-          <text x="37" y="39" fill="var(--ink-3)" fontSize="7" letterSpacing="1"
-            textAnchor="middle">CUT</text>
+          <path d="M37 1 L34 5 M37 1 L40 5" stroke={accent} strokeWidth="1.2" />
+          <path d="M37 27 L34 23 M37 27 L40 23" stroke={accent} strokeWidth="1.2" />
         </>
       )}
-      {folds && (
-        <text x="37" y="39" fill="var(--ink-3)" fontSize="7" letterSpacing="1"
-          textAnchor="middle">FOLD</text>
-      )}
+      <text x="37" y="39" fill="var(--ink-3)" fontSize="7" letterSpacing="1"
+        textAnchor="middle">{folds ? "FOLD" : "CUT"}</text>
     </svg>
   );
 }
