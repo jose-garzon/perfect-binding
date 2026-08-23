@@ -16,16 +16,11 @@ import { PageGrid } from "./components/PageGrid";
 import { PagesPanel } from "./components/PagesPanel";
 import { Field, Segmented, Select, Slider, Switch } from "./components/Controls";
 import {
-  FoldedDiagram, MarginsDiagram, PerfectDiagram, SaddleDiagram,
+  DraftDiagram, MarginsDiagram, PerfectDiagram, SaddleDiagram,
 } from "./components/Diagrams";
 import { UpdateBar, useUpdate } from "./components/UpdateBar";
 
-/**
- * "folded" is a saddle imposition with exactly one sheet per signature: every
- * sheet is folded on its own, the folded sheets are stacked, and the spine is
- * glued rather than stapled.
- */
-type BindingChoice = "saddle" | "folded" | "perfect" | "none";
+type BindingChoice = "saddle" | "perfect" | "draft" | "none";
 
 interface Settings {
   binding: BindingChoice;
@@ -64,14 +59,14 @@ const BINDINGS: Array<{
     Diagram: SaddleDiagram,
   },
   {
-    id: "folded", title: "Folded & glued",
-    desc: "Fold every sheet on its own, stack the folded sheets, glue the spine.",
-    Diagram: FoldedDiagram,
-  },
-  {
     id: "perfect", title: "Perfect binding",
     desc: "Print flat, cut down the middle, stack the piles, glue the spine.",
     Diagram: PerfectDiagram,
+  },
+  {
+    id: "draft", title: "Optimized draft print",
+    desc: "Two pages a side in reading order, stacked and stapled at the corner.",
+    Diagram: DraftDiagram,
   },
   {
     id: "none", title: "Margins only",
@@ -84,10 +79,8 @@ const BINDINGS: Array<{
 function coreBinding(choice: BindingChoice, sheetsPerSignature: number) {
   if (choice === "none") return { binding: "none" as const, sheetsPerSignature: 0 };
   if (choice === "perfect") return { binding: "perfect" as const, sheetsPerSignature: 0 };
-  return {
-    binding: "saddle" as const,
-    sheetsPerSignature: choice === "folded" ? 1 : sheetsPerSignature,
-  };
+  if (choice === "draft") return { binding: "draft" as const, sheetsPerSignature: 0 };
+  return { binding: "saddle" as const, sheetsPerSignature };
 }
 
 const ASSEMBLY: Record<BindingChoice, string[]> = {
@@ -97,17 +90,16 @@ const ASSEMBLY: Record<BindingChoice, string[]> = {
     "Fold the whole stack once down the middle.",
     "Staple twice through the fold, then trim the fore-edge.",
   ],
-  folded: [
-    "Print double-sided on the chosen paper, landscape.",
-    "Fold each sheet in half on its own — no nesting.",
-    "Stack the folded sheets in printed order, folds all on the same side.",
-    "Clamp the folded spine, glue it, and let it cure before trimming.",
-  ],
   perfect: [
     "Print double-sided on the chosen paper, landscape.",
     "Cut every sheet down the middle line.",
     "Put the right-hand pile underneath the left-hand pile.",
     "Clamp the spine, roughen it, glue and let it cure.",
+  ],
+  draft: [
+    "Print double-sided on the chosen paper, landscape.",
+    "Stack the sheets in printed order — nothing is folded or cut.",
+    "Drive one staple through the top corner of the stack.",
   ],
   none: [
     "Print single- or double-sided as usual.",
@@ -316,7 +308,11 @@ export default function App() {
   const exportPdf = useCallback(async () => {
     const bytes = built.current;
     if (!bytes || !file) return;
-    const suffix = settings.binding === "none" ? "trimmed" : `${settings.binding}-booklet`;
+    const suffix = settings.binding === "none"
+      ? "trimmed"
+      : settings.binding === "draft"
+        ? "draft-print"
+        : `${settings.binding}-booklet`;
     const selected = selection.removedCount
       ? ` (${selection.keptCount} of ${pageCount} pages)`
       : "";
@@ -341,7 +337,9 @@ export default function App() {
     () => formatRanges(selection.kept),
     [selection.kept],
   );
-  const isBooklet = settings.binding !== "none";
+  // Everything except margins-only puts two source pages on a sheet side, and
+  // that — not whether the job is a book — is what these controls depend on.
+  const isTwoUp = settings.binding !== "none";
 
   if (!file) return <Landing onFile={openFile} error={error} update={update} />;
 
@@ -424,7 +422,7 @@ export default function App() {
           <section className="section">
             <h2><span className="step">03</span>Paper</h2>
             <Field label="Sheet size"
-              hint={isBooklet ? "Sheets print landscape, two pages per side." : undefined}>
+              hint={isTwoUp ? "Sheets print landscape, two pages per side." : undefined}>
               <Select value={settings.paperId} onChange={(v) => set("paperId", v)}
                 options={[...PAPER_SIZES.map((p) => ({ value: p.id, label: p.label })),
                   { value: "source", label: "Match the source pages" }]} />
@@ -433,7 +431,7 @@ export default function App() {
               <Slider min={0} max={25} value={settings.outerMargin}
                 onChange={(v) => set("outerMargin", v)} />
             </Field>
-            {isBooklet && (
+            {isTwoUp && (
               <Field label="Spine gutter" value={`${settings.gutter} mm`}
                 hint="Room for the fold or the glue, split between the two pages.">
                 <Slider min={0} max={40} value={settings.gutter} onChange={(v) => set("gutter", v)} />
@@ -470,7 +468,7 @@ export default function App() {
             )}
           </section>
 
-          {isBooklet && (
+          {isTwoUp && (
             <section className="section">
               <h2><span className="step">05</span>Printing</h2>
               <Field label="Duplex flip"
@@ -481,12 +479,6 @@ export default function App() {
                     { value: "long", label: "Long edge" },
                   ]} />
               </Field>
-              {settings.binding === "folded" && (
-                <p className="hint" style={{ marginBottom: 18 }}>
-                  Each sheet holds 4 pages and is folded by itself, so the spine stays
-                  square however long the document is.
-                </p>
-              )}
               {settings.binding === "saddle" && (
                 <Field label="Signature size"
                   value={settings.sheetsPerSignature === 0 ? "one booklet" : `${settings.sheetsPerSignature} sheets`}
@@ -495,11 +487,14 @@ export default function App() {
                     onChange={(v) => set("sheetsPerSignature", v)} />
                 </Field>
               )}
-              <Field label="">
-                <Switch label={settings.binding === "perfect" ? "Cut line" : "Fold line"}
-                  sub="Dashed guide down the middle of the sheet"
-                  checked={settings.guideLine} onChange={(v) => set("guideLine", v)} />
-              </Field>
+              {/* A draft is neither folded nor cut, so there is no guide to draw. */}
+              {settings.binding !== "draft" && (
+                <Field label="">
+                  <Switch label={settings.binding === "perfect" ? "Cut line" : "Fold line"}
+                    sub="Dashed guide down the middle of the sheet"
+                    checked={settings.guideLine} onChange={(v) => set("guideLine", v)} />
+                </Field>
+              )}
               <Field label="">
                 <Switch label="Trim marks" sub="Corner marks for cutting the fore-edge"
                   checked={settings.cropMarks} onChange={(v) => set("cropMarks", v)} />
@@ -552,7 +547,7 @@ export default function App() {
             <Stat k="Source" v={selection.removedCount
               ? `${selection.keptCount} of ${pageCount} pages`
               : `${pageCount} pages`} />
-            {isBooklet ? (
+            {isTwoUp ? (
               <>
                 <Stat k="Sheets of paper" v={`${output?.sheets ?? sheets}`} />
                 <Stat k="Printed sides" v={`${output?.pages ?? sheets * 2}`} />
@@ -604,9 +599,9 @@ function Landing({ onFile, error, update }: {
               <p className="kicker">Booklet imposition · Margin trimming · Offline</p>
               <h1>Turn any PDF<br />into a <em>booklet</em></h1>
               <p className="standfirst">
-                Reorder pages for stitched, folded, or perfect binding, trim dead
-                margins so the text prints larger, and check every sheet before you
-                print.
+                Reorder pages for stitched or perfect binding, print a two-up draft
+                to read, trim dead margins so the text prints larger, and check every
+                sheet before you print.
               </p>
             </div>
             <div>
@@ -617,7 +612,7 @@ function Landing({ onFile, error, update }: {
 
           <div className="directory-head">
             <h2>Binding directory</h2>
-            <p>Four ways to turn a stack of paper into a book</p>
+            <p>Four ways to turn a stack of paper into something you can read</p>
           </div>
           <div className="directory">
             {BINDINGS.map(({ id, title, desc, Diagram }) => (

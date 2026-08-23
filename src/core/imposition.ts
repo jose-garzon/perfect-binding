@@ -6,7 +6,7 @@
  * slot (padding).
  */
 
-export type Binding = "saddle" | "perfect";
+export type Binding = "saddle" | "perfect" | "draft";
 
 /** Which paper edge the printer flips around when printing duplex. */
 export type DuplexFlip = "short" | "long";
@@ -61,7 +61,9 @@ export function impose(opts: ImposeOptions): SheetSide[] {
   const sides =
     binding === "saddle"
       ? saddleSides(pageCount, opts.sheetsPerSignature ?? 0)
-      : perfectSides(pageCount);
+      : binding === "perfect"
+        ? perfectSides(pageCount)
+        : draftSides(pageCount);
 
   const rotate = opts.duplexFlip === "long";
   const total = padToSheet(pageCount);
@@ -127,6 +129,23 @@ function perfectSides(pageCount: number): RawSide[] {
 }
 
 /**
+ * Optimized draft print: nothing is folded, nested, or cut. Pages run straight
+ * down the stack two to a side, so a sheet reads 1, 2 on its front and 3, 4 on
+ * its back, and one staple through the top corner holds the job together.
+ */
+function draftSides(pageCount: number): RawSide[] {
+  const sheets = padToSheet(pageCount) / PAGES_PER_SHEET;
+
+  const out: RawSide[] = [];
+  for (let i = 0; i < sheets; i++) {
+    const first = i * PAGES_PER_SHEET;
+    out.push({ side: "front", left: first + 1, right: first + 2 });
+    out.push({ side: "back", left: first + 3, right: first + 4 });
+  }
+  return out;
+}
+
+/**
  * Reading order after the job is folded (or cut) and assembled. Used to verify
  * that an imposition round-trips. Assumes left-to-right output.
  */
@@ -136,6 +155,12 @@ export function assemble(
 ): (number | null)[] {
   if (opts.binding === "perfect") {
     return [...sides.map((s) => s.left), ...sides.map((s) => s.right)];
+  }
+
+  // A draft is read exactly as it comes off the printer: no assembly step
+  // moves a page anywhere.
+  if (opts.binding === "draft") {
+    return sides.flatMap((s) => [s.left, s.right]);
   }
 
   const sheets = sides.length / 2;

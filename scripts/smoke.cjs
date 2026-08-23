@@ -144,11 +144,11 @@ app.whenReady().then(async () => {
   console.log("perfect:", JSON.stringify(perfect));
   await shoot(win, OUT.replace(/\.png$/, "-perfect.png"));
 
-  // 4. fold-and-glue: saddle imposition with one sheet per signature, so the
-  //    first sheet must carry pages 4 and 1 rather than the last page and 1
+  // 4. optimized draft print: pages in reading order, nothing to fold or cut, so
+  //    the sheet must lose its fold guide and the guide-line switch must go away
   await win.webContents.executeJavaScript(
-    `[...document.querySelectorAll('.card')].find(b => b.innerText.includes('Folded & glued')).click(), true`);
-  const folded = await waitFor(win, `(() => {
+    `[...document.querySelectorAll('.card')].find(b => b.innerText.includes('Optimized draft print')).click(), true`);
+  const draft = await waitFor(win, `(() => {
     const c = document.querySelector('.sheet canvas');
     if (!c || c.width === 300) return null;
     const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -160,20 +160,27 @@ app.whenReady().then(async () => {
       label: document.querySelector('.sheet-label')?.innerText,
       fold: !!document.querySelector('.sheet .fold'),
       steps: [...document.querySelectorAll('.section ol li')].map(li => li.innerText)[1],
+      guideSwitch: [...document.querySelectorAll('.switch')]
+        .some(l => /Fold line|Cut line/.test(l.innerText)),
+      stats: [...document.querySelectorAll('.stat')].map(s => s.innerText.replace('\\n', ': ')),
     };
   })()`, 20000);
-  if (!folded) {
+  if (!draft) {
     const diag = await win.webContents.executeJavaScript(
       `({ cards: [...document.querySelectorAll('.card')].map(b => [b.innerText.split('\\n')[0], b.getAttribute('aria-pressed')]),
           label: document.querySelector('.sheet-label')?.innerText,
           error: document.querySelector('.error')?.innerText || null })`);
     console.error("diagnostics:", JSON.stringify(diag, null, 2));
-    fail("folded & glued layout never rendered");
+    fail("draft print layout never rendered");
   }
-  console.log("folded:", JSON.stringify(folded));
-  if (!folded.fold) fail("fold guide missing in folded mode");
-  if (folded.hash === state.hash) fail("folded mode imposed the same sheet as saddle stitch");
-  await shoot(win, OUT.replace(/\.png$/, "-folded.png"));
+  console.log("draft:", JSON.stringify(draft));
+  if (draft.fold) fail("a draft print is not folded, but the fold guide is drawn");
+  if (draft.guideSwitch) fail("the fold/cut guide switch is still offered for a draft print");
+  if (draft.hash === state.hash) fail("draft mode imposed the same sheet as saddle stitch");
+  if (!/staple/i.test(draft.steps || "") && !/stack/i.test(draft.steps || "")) {
+    fail(`unexpected draft assembly steps: ${draft.steps}`);
+  }
+  await shoot(win, OUT.replace(/\.png$/, "-draft.png"));
 
   if (errors.length) fail(`console errors:\n${errors.join("\n")}`);
   console.log("SMOKE OK");

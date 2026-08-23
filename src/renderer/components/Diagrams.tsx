@@ -1,8 +1,9 @@
-/* One drawing system for all five figures: every binding is shown end-on, as
-   the cross-section you would see looking down the spine, on a shared 76×56
-   stage. Paper is a filled surface with a hairline edge, the outermost sheet
-   carries the darker stroke, and the spot colour is spent on one thing only —
-   whatever actually holds the book together (staples, glue, the trim). */
+/* One drawing system for all five figures: a binding is shown end-on, as the
+   cross-section you would see looking down the spine, on a shared 76×56 stage.
+   Paper is a filled surface with a hairline edge, the outermost sheet carries
+   the darker stroke, and the spot colour is spent on one thing only — whatever
+   actually holds the book together (staples, glue, the trim). The draft print
+   is the exception: it has no spine to look down, so it is drawn face-on. */
 
 interface Props { width?: number; height?: number }
 
@@ -54,24 +55,33 @@ export function SaddleDiagram(props: Props) {
   );
 }
 
-/** Each sheet folded on its own, the folded sheets stacked and glued. */
-export function FoldedDiagram(props: Props) {
-  const tops = [8, 22, 36];
+/**
+ * The one figure that is not a cross-section: a draft has no spine to look down.
+ * Flat sheets, two pages to a side, held by a single staple in the top corner.
+ */
+export function DraftDiagram(props: Props) {
   return (
     <Stage {...props}>
-      {tops.map((top, i) => (
-        <path
-          key={top}
-          d={foldedSheet(16, top, top + 12, 64)}
+      {[2, 1, 0].map((i) => (
+        <rect
+          key={i}
+          x={12 + i * 2.5} y={8 + i * 3} width="48" height="32" rx="1"
           fill={paper}
           stroke={i === 0 ? ink : faint}
           strokeWidth={HAIR}
         />
       ))}
-      {/* glue beads down the folds — each sheet stuck to the next */}
-      {[14, 28, 42].map((y) => (
-        <circle key={y} cx="19.2" cy={y} r="2" fill={accent} />
+      {/* the two pages sharing the top sheet */}
+      <line x1="36" y1="12" x2="36" y2="36" stroke={faint} strokeWidth=".8" opacity=".7" />
+      {[0, 1, 2].map((i) => (
+        <g key={i} stroke={ink} strokeWidth="1.5" opacity=".45">
+          <line x1="18" y1={20 + i * 5} x2={i === 2 ? 27 : 32} y2={20 + i * 5} />
+          <line x1="40" y1={20 + i * 5} x2={i === 2 ? 49 : 54} y2={20 + i * 5} />
+        </g>
       ))}
+      {/* the one staple, driven through every sheet at the corner */}
+      <rect x="13" y="12" width="8" height="2.6" rx="1.3" fill={accent}
+        transform="rotate(-45 17 13.3)" />
     </Stage>
   );
 }
@@ -116,10 +126,11 @@ export function MarginsDiagram(props: Props) {
   );
 }
 
-/** How the printed sheet is folded or cut, shown next to the preview. */
-export function SheetDiagram({ binding }: { binding: "saddle" | "folded" | "perfect" | "none" }) {
+/** How the printed sheet is folded, cut, or stapled, shown next to the preview. */
+export function SheetDiagram({ binding }: { binding: "saddle" | "perfect" | "draft" | "none" }) {
   if (binding === "none") return null;
-  const folds = binding !== "perfect";
+  if (binding === "draft") return <StapleSheet />;
+  const folds = binding === "saddle";
   return (
     <svg width="74" height="42" viewBox="0 0 74 42" fill="none" aria-hidden="true"
       strokeLinecap="round" strokeLinejoin="round">
@@ -141,6 +152,22 @@ export function SheetDiagram({ binding }: { binding: "saddle" | "folded" | "perf
       )}
       <text x="37" y="39" fill="var(--ink-3)" fontSize="7" letterSpacing="1"
         textAnchor="middle">{folds ? "FOLD" : "CUT"}</text>
+    </svg>
+  );
+}
+
+/** A draft sheet: nothing to fold or cut, one staple through the corner. */
+function StapleSheet() {
+  return (
+    <svg width="74" height="42" viewBox="0 0 74 42" fill="none" aria-hidden="true"
+      strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="3" width="64" height="26" rx="1"
+        fill="var(--surface)" stroke={faint} strokeWidth={HAIR} />
+      <line x1="37" y1="6" x2="37" y2="26" stroke={faint} strokeWidth=".8" opacity=".7" />
+      <rect x="6" y="6" width="8" height="2.6" rx="1.3" fill={accent}
+        transform="rotate(-45 10 7.3)" />
+      <text x="37" y="39" fill="var(--ink-3)" fontSize="7" letterSpacing="1"
+        textAnchor="middle">STAPLE</text>
     </svg>
   );
 }

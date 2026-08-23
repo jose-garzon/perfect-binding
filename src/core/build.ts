@@ -22,7 +22,10 @@ export interface BuildOptions {
   duplexFlip?: DuplexFlip;
   sheetsPerSignature?: number;
   rtl?: boolean;
-  /** Dashed line down the fold (saddle) or the cut (perfect). */
+  /**
+   * Dashed line down the fold (saddle) or the cut (perfect). A draft print is
+   * neither folded nor cut, so the line is never drawn for one.
+   */
   guideLine?: boolean;
   /** Corner trim marks. */
   cropMarks?: boolean;
@@ -141,7 +144,7 @@ export async function buildBooklet(
       });
     }
 
-    if (opts.guideLine) drawGuideLine(page, half, size.height);
+    if (opts.guideLine && opts.binding !== "draft") drawGuideLine(page, half, size.height);
     if (opts.cropMarks) drawCropMarks(page, size, outerMargin);
     if (side.rotate180) page.setRotation(degrees(180));
 

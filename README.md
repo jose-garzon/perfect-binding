@@ -3,9 +3,9 @@
 # Perfect Binding
 
 Desktop app that turns a PDF into a print-ready booklet. Reorders pages for
-**stitched (saddle) binding**, **folded & glued**, or **perfect binding**, trims
-dead margins so the text prints larger, and previews every sheet before you
-export.
+**stitched (saddle) binding** or **perfect binding**, prints a two-up
+**optimized draft** to read, trims dead margins so the text prints larger, and
+previews every sheet before you export.
 
 Everything runs locally — the PDF never leaves the machine.
 
@@ -13,9 +13,10 @@ Everything runs locally — the PDF never leaves the machine.
 
 ## Features
 
-- **Four ways to bind.** Stitched (saddle), folded & glued, perfect binding, or
-  margins-only with no reordering at all. Each one is explained in the app, in
-  the [section below](#what-the-four-modes-do), and drawn on the card you pick.
+- **Four ways to print.** Stitched (saddle), perfect binding, an optimized draft
+  print, or margins-only with no reordering at all. Each one is explained in the
+  app, in the [section below](#what-the-four-modes-do), and drawn on the card you
+  pick.
 - **Drop pages without leaving the app.** Switch the plate to the contact sheet,
   click a page to remove it or shift-click a run, or type the pages you want as
   ranges (`1-4, 9, 12-`). Removed pages stay in place, dimmed and struck
@@ -25,7 +26,8 @@ Everything runs locally — the PDF never leaves the machine.
   results are merged across the document, and the crop is scaled back up to fill
   the sheet. Nudge any edge by hand if the detector clips something.
 - **A sheet-by-sheet proof.** Step through every sheet, front and back, with the
-  fold line or the cut line drawn where it will fall — before you spend paper.
+  fold line or the cut line drawn where it will fall — before you spend paper. A
+  draft print is neither folded nor cut, so it gets no guide at all.
 - **The numbers that decide the print job.** Sheets of paper, printed sides,
   blank slots, duplex flip, and how much was trimmed, kept in view at all times.
 - **Paper and spine controls.** A4, Letter, Legal, A3, Tabloid, or A5; outer
@@ -114,19 +116,24 @@ padded to a multiple of 4. Thick books fold badly at the fore-edge, so the
 signature slider splits the job into nested groups of N sheets that you bind
 together afterwards.
 
-**Folded & glued.** Every sheet is folded on its own — no nesting — and the
-folded sheets are stacked and glued at the spine. This is a saddle imposition
-with exactly one sheet per signature, so sheet 1 carries pages 4 and 1 on the
-front and 2 and 3 on the back. The spine stays square no matter how long the
-document is, and nothing needs stapling.
-
 **Perfect binding.** Sheets stay flat and are printed as a *cut stack*: sheet 1
 carries pages 1 and 1+N/2, sheet 2 carries pages 2 and 2+N/2, and so on. Slice
 every sheet down the middle, drop the right-hand pile under the left-hand pile,
 and the book is in order, ready to glue.
 
+**Optimized draft print.** Nothing is folded, nested, or cut: pages run straight
+down the stack two to a side, so sheet 1 carries pages 1 and 2 on its front and 3
+and 4 on its back, sheet 2 carries 5 and 6 then 7 and 8, and so on. Stack the
+sheets in printed order and drive one staple through the top corner. Half the
+paper of a one-up print, and readable the moment it comes out of the printer —
+for drafts, papers, and manuscripts you mean to mark up rather than bind.
+
 **Margins only.** No reordering. The detected content box is cropped and scaled
 up to fill the paper — useful for academic PDFs with enormous margins.
+
+*Folded & glued* used to be a fifth card here. It was a saddle imposition with
+exactly one sheet per signature and nothing more, so it is now reached by picking
+**Stitched (saddle)** and setting the signature slider to 1 sheet.
 
 ## Page selection
 
@@ -192,7 +199,7 @@ that is already being painted, which React Strict Mode triggers constantly.
 
 ```
 src/core/         pure logic, no DOM — unit tested
-  imposition.ts   page order → sheet sides (signature size 1 = folded & glued)
+  imposition.ts   page order → sheet sides (saddle, perfect, sequential draft)
   crop.ts         whitespace detection over raw pixels
   build.ts        pdf-lib output assembly
   paper.ts        paper sizes in points

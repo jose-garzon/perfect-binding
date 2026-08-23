@@ -44,6 +44,45 @@ describe("buildBooklet", () => {
     ]);
   });
 
+  test("a draft print lays the pages out in reading order", async () => {
+    const out = await buildBooklet(await sourcePdf(8), { binding: "draft", paperId: "a4" });
+    expect(out.layout.map((s) => [s.left, s.right])).toEqual([
+      [1, 2], [3, 4], [5, 6], [7, 8],
+    ]);
+    expect(out.sheets).toBe(2);
+    const sizes = await sizesOf(out.bytes);
+    for (const s of sizes) expect(s.width).toBeGreaterThan(s.height);
+  });
+
+  test("long-edge duplex rotates the back of every draft sheet", async () => {
+    const out = await buildBooklet(await sourcePdf(8), {
+      binding: "draft", paperId: "a4", duplexFlip: "long",
+    });
+    const doc = await PDFDocument.load(out.bytes);
+    expect(doc.getPages().map((p) => p.getRotation().angle)).toEqual([0, 180, 0, 180]);
+  });
+
+  test("a draft print draws no guide line", async () => {
+    // There is nothing to fold or cut, so the flag has to be inert. A drawn
+    // line would leave its operators in the content stream and grow the file.
+    const draftOn = await buildBooklet(await sourcePdf(8), {
+      binding: "draft", paperId: "a4", guideLine: true,
+    });
+    const draftOff = await buildBooklet(await sourcePdf(8), {
+      binding: "draft", paperId: "a4", guideLine: false,
+    });
+    expect(draftOn.bytes.byteLength).toBe(draftOff.bytes.byteLength);
+
+    // The same comparison on a saddle job, to prove the probe can see a line.
+    const saddleOn = await buildBooklet(await sourcePdf(8), {
+      binding: "saddle", paperId: "a4", guideLine: true,
+    });
+    const saddleOff = await buildBooklet(await sourcePdf(8), {
+      binding: "saddle", paperId: "a4", guideLine: false,
+    });
+    expect(saddleOn.bytes.byteLength).toBeGreaterThan(saddleOff.bytes.byteLength);
+  });
+
   test("long-edge duplex rotates back sides in the output pdf", async () => {
     const out = await buildBooklet(await sourcePdf(8), {
       binding: "saddle", paperId: "a4", duplexFlip: "long",

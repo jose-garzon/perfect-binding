@@ -124,6 +124,50 @@ describe("perfect binding", () => {
   });
 });
 
+describe("optimized draft print", () => {
+  test("8 pages run straight down 2 sheets", () => {
+    const sides = impose({ binding: "draft", pageCount: 8 });
+    expect(sides.map(pair)).toEqual([
+      [1, 2],
+      [3, 4],
+      [5, 6],
+      [7, 8],
+    ]);
+    expect(sides.map((s) => `${s.sheet}${s.side[0]}`)).toEqual(["0f", "0b", "1f", "1b"]);
+  });
+
+  test("the blanks all land at the end of the last sheet", () => {
+    const sides = impose({ binding: "draft", pageCount: 5 });
+    expect(sides.map(pair)).toEqual([
+      [1, 2],
+      [3, 4],
+      [5, null],
+      [null, null],
+    ]);
+    expect(sheetCount(5)).toBe(2);
+    expect(blankCount(5)).toBe(3);
+  });
+
+  test("the printed stack reads back in source order", () => {
+    for (const n of [1, 4, 7, 8, 33, 100]) {
+      const sides = impose({ binding: "draft", pageCount: n });
+      const pages = assemble(sides, { binding: "draft" });
+      expect(pages.slice(0, n)).toEqual(Array.from({ length: n }, (_, i) => i + 1));
+      expect(pages.slice(n).every((p) => p === null)).toBe(true);
+    }
+  });
+
+  test("rtl mirrors each side", () => {
+    const sides = impose({ binding: "draft", pageCount: 8, rtl: true });
+    expect(sides.map(pair)).toEqual([
+      [2, 1],
+      [4, 3],
+      [6, 5],
+      [8, 7],
+    ]);
+  });
+});
+
 describe("output shape", () => {
   test("sides alternate front/back per sheet", () => {
     const sides = impose({ binding: "saddle", pageCount: 12 });

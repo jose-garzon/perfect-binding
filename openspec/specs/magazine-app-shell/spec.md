@@ -76,8 +76,9 @@ the contact sheet.
 
 ### Requirement: Binding directory cards
 
-The four binding methods SHALL be presented as selectable entries, each pairing its
-diagram with a title and a one-line description, separated by hairline rules. The
+The four methods SHALL be presented as selectable entries, each pairing its diagram
+with a title and a one-line description, separated by hairline rules. The four SHALL be
+stitched (saddle), perfect binding, optimized draft print, and margins only. The
 selected entry SHALL be distinguished by its border and ground and SHALL carry
 `aria-pressed="true"`. Each entry's text SHALL begin with its title.
 
@@ -86,6 +87,18 @@ selected entry SHALL be distinguished by its border and ground and SHALL carry
 - **WHEN** the user activates the "Perfect binding" entry
 - **THEN** that entry becomes the pressed one, the others release, and the preview
   rebuilds for the new imposition
+
+#### Scenario: Choosing the draft print
+
+- **WHEN** the user activates the "Optimized draft print" entry
+- **THEN** that entry becomes the pressed one, the preview rebuilds with the pages in
+  reading order two to a side, and the assembly steps describe the corner staple
+
+#### Scenario: The folded and glued entry is gone
+
+- **WHEN** the entries are displayed
+- **THEN** no entry offers folded and glued binding, and the stitched entry with a
+  signature size of one sheet produces that imposition instead
 
 #### Scenario: Diagrams match the design system
 
@@ -119,9 +132,9 @@ being viewed.
 
 #### Scenario: The fold guide follows the binding
 
-- **WHEN** a saddle or folded binding is selected
+- **WHEN** a saddle binding is selected
 - **THEN** a fold guide is drawn down the middle of the sheet; **AND WHEN** perfect
-  binding or margins-only is selected, no fold guide is drawn
+  binding, optimized draft print, or margins-only is selected, no fold guide is drawn
 
 #### Scenario: Rebuilding after a settings change
 
@@ -172,14 +185,21 @@ margin trimming is on, the trimmed amount SHALL be included.
 
 With no document open, the app SHALL present a cover: a display headline, a serif
 standfirst, and a dropzone presented as a framed plate. Below the cover the four
-binding methods SHALL be laid out as a directory grid of hairline cells, each with
-its diagram, name, and description. Load failures SHALL be reported on this screen.
+methods SHALL be laid out as a directory grid of hairline cells, each with its
+diagram, name, and description, and the directory SHALL name the same four methods the
+settings column offers. Load failures SHALL be reported on this screen.
 
 #### Scenario: First launch
 
 - **WHEN** the app opens with no document
 - **THEN** the cover shows the headline, standfirst, dropzone, and the four-method
   directory
+
+#### Scenario: The directory matches the settings column
+
+- **WHEN** the directory is displayed
+- **THEN** it lists stitched (saddle), perfect binding, optimized draft print, and
+  margins only, and lists no folded and glued method
 
 #### Scenario: Dropping a PDF
 

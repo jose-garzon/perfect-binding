@@ -16,7 +16,7 @@ export type PlateView = "proof" | "pages";
 export function Preview({ src, layout, binding, busy, sheetCount, view, onView, pages }: {
   src: string | null;
   layout: SheetSide[];
-  binding: "saddle" | "folded" | "perfect" | "none";
+  binding: "saddle" | "perfect" | "draft" | "none";
   busy: boolean;
   sheetCount: number;
   /** Which of the plate's two views is on show. */
@@ -93,7 +93,7 @@ export function Preview({ src, layout, binding, busy, sheetCount, view, onView, 
         {proof ? (
           <div className={`sheet${busy ? "" : " turning"}`} key={index}>
             <canvas ref={canvas} />
-            {binding !== "perfect" && binding !== "none" && <span className="fold" />}
+            {binding === "saddle" && <span className="fold" />}
           </div>
         ) : pages}
       </div>
