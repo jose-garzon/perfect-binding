@@ -4,10 +4,16 @@ import { buildBooklet, type BuildResult } from "../core/build";
 import { PAPER_SIZES, mm } from "../core/paper";
 import { sheetCount as sheetsFor, blankCount } from "../core/imposition";
 import { FULL_PAGE, type Bounds } from "../core/crop";
-import { closePdf, loadPdf, renderPage, scanMargins } from "./lib/pdf";
+import {
+  clearThumbnails, closePdf, loadPdf, renderPage, renderThumbnail, scanBlanks, scanMargins,
+} from "./lib/pdf";
+import { formatRanges, parseRanges } from "./lib/ranges";
+import { usePageSelection } from "./lib/selection";
 import { Dropzone } from "./components/Dropzone";
-import { Preview } from "./components/Preview";
+import { Preview, type PlateView } from "./components/Preview";
 import { CropPanel } from "./components/CropPanel";
+import { PageGrid } from "./components/PageGrid";
+import { PagesPanel } from "./components/PagesPanel";
 import { Field, Segmented, Select, Slider, Switch } from "./components/Controls";
 import {
   FoldedDiagram, MarginsDiagram, PerfectDiagram, SaddleDiagram,
@@ -129,12 +135,30 @@ export default function App() {
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [view, setView] = useState<PlateView>("proof");
+  const [rangeError, setRangeError] = useState<string | null>(null);
+  const [hideRemoved, setHideRemoved] = useState(false);
+  const [blankScan, setBlankScan] = useState(0); // 0-1 progress, 0 = idle
+  const blankAbort = useRef<AbortController | null>(null);
   const update = useUpdate();
   const buildId = useRef(0);
+  const selection = usePageSelection(pageCount);
 
   const set = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((s) => ({ ...s, [key]: value }));
   }, []);
+
+  /** Everything about a page selection is per-document and starts clean. */
+  const resetPages = useCallback(() => {
+    blankAbort.current?.abort();
+    blankAbort.current = null;
+    setBlankScan(0);
+    setRangeError(null);
+    setHideRemoved(false);
+    setView("proof");
+    clearThumbnails();
+    selection.reset();
+  }, [selection]);
 
   /* ── loading a document ─────────────────────────────────────────────── */
   const openFile = useCallback(async (f: File) => {
@@ -142,6 +166,7 @@ export default function App() {
     setOutput((old) => { if (old) URL.revokeObjectURL(old.url); return null; });
     setDetected(null);
     setCrop(FULL_PAGE);
+    resetPages();
     try {
       const bytes = new Uint8Array(await f.arrayBuffer());
       const d = await loadPdf(bytes);
@@ -153,16 +178,17 @@ export default function App() {
     } catch {
       setError("That file could not be opened as a PDF.");
     }
-  }, []);
+  }, [resetPages]);
 
   const closeFile = useCallback(() => {
+    resetPages();
     source.current = null;
     built.current = null;
     setFile(null);
     setOutput((old) => { if (old) URL.revokeObjectURL(old.url); return null; });
     setDoc((old) => { closePdf(old); return null; });
     setPageCount(0);
-  }, []);
+  }, [resetPages]);
 
   /** Draws a source page for the crop preview without exposing pdf.js as a prop. */
   const renderSample = useCallback(async (canvas: HTMLCanvasElement, pageNumber: number) => {
@@ -171,6 +197,60 @@ export default function App() {
     await renderPage(page, canvas, 150);
     page.cleanup();
   }, [doc]);
+
+  /** Paints one contact-sheet tile. Returns false when the work was dropped. */
+  const drawThumbnail = useCallback(async (
+    canvas: HTMLCanvasElement, page: number, signal: AbortSignal,
+  ) => {
+    if (!doc) return false;
+    const bitmap = await renderThumbnail(doc, page, 160, signal);
+    if (!bitmap || signal.aborted) return false;
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return false;
+    ctx.drawImage(bitmap, 0, 0);
+    return true;
+  }, [doc]);
+
+  /* ── page selection ─────────────────────────────────────────────────── */
+  const applyRanges = useCallback((text: string) => {
+    const parsed = parseRanges(text, pageCount);
+    if (!parsed.ok) { setRangeError(parsed.error); return; }
+    setRangeError(null);
+    selection.keepOnly(parsed.pages);
+  }, [pageCount, selection]);
+
+  const removeBlanks = useCallback(async () => {
+    if (!doc) return;
+    blankAbort.current?.abort();
+    const ac = new AbortController();
+    blankAbort.current = ac;
+    setRangeError(null);
+    setBlankScan(0.001);
+    try {
+      const blank = await scanBlanks(doc, (done, total) => setBlankScan(done / total), ac.signal);
+      if (ac.signal.aborted) return;
+      const fresh = blank.filter((p) => !selection.removed.has(p));
+      if (fresh.length === 0) selection.setNotice("No blank pages found.");
+      else {
+        selection.remove(fresh);
+        selection.setNotice(`Removed ${fresh.length} blank page${fresh.length === 1 ? "" : "s"}.`);
+      }
+    } catch {
+      // An aborted scan is the expected outcome of cancelling or closing.
+    } finally {
+      if (blankAbort.current === ac) blankAbort.current = null;
+      if (!ac.signal.aborted) setBlankScan(0);
+      else setBlankScan(0);
+    }
+  }, [doc, selection]);
+
+  const cancelBlanks = useCallback(() => {
+    blankAbort.current?.abort();
+    blankAbort.current = null;
+    setBlankScan(0);
+  }, []);
 
   /* ── margin detection, once per document ───────────────────────────── */
   useEffect(() => {
@@ -205,6 +285,7 @@ export default function App() {
         const { bytes: outBytes, ...info } = await buildBooklet(bytes, {
           ...coreBinding(settings.binding, settings.sheetsPerSignature),
           paperId: settings.paperId,
+          pages: selection.kept,
           crop: activeCrop,
           outerMargin: mm(settings.outerMargin),
           gutter: mm(settings.gutter),
@@ -229,14 +310,17 @@ export default function App() {
       }
     }, 220);
     return () => clearTimeout(timer);
-  }, [file, settings, activeCrop]);
+  }, [file, settings, activeCrop, selection.kept]);
 
   /* ── export ─────────────────────────────────────────────────────────── */
   const exportPdf = useCallback(async () => {
     const bytes = built.current;
     if (!bytes || !file) return;
     const suffix = settings.binding === "none" ? "trimmed" : `${settings.binding}-booklet`;
-    const name = `${file.name.replace(/\.pdf$/i, "")} — ${suffix}.pdf`;
+    const selected = selection.removedCount
+      ? ` (${selection.keptCount} of ${pageCount} pages)`
+      : "";
+    const name = `${file.name.replace(/\.pdf$/i, "")} — ${suffix}${selected}.pdf`;
     const bridge = window.desktop;
     if (bridge) {
       const ok = await bridge.savePdf(name, bytes);
@@ -249,10 +333,14 @@ export default function App() {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2200);
-  }, [output, file, settings.binding]);
+  }, [output, file, settings.binding, selection.keptCount, selection.removedCount, pageCount]);
 
 
-  const sheets = pageCount ? sheetsFor(pageCount) : 0;
+  const sheets = selection.keptCount ? sheetsFor(selection.keptCount) : 0;
+  const keptRanges = useMemo(
+    () => formatRanges(selection.kept),
+    [selection.kept],
+  );
   const isBooklet = settings.binding !== "none";
 
   if (!file) return <Landing onFile={openFile} error={error} update={update} />;
@@ -264,7 +352,11 @@ export default function App() {
         <span className="folio-line">
           <strong>{file.name}</strong>
           <span className="rule-v" />
-          <span>{pageCount} pages</span>
+          <span>
+            {selection.removedCount
+              ? `${selection.keptCount} of ${pageCount} pages · ${selection.removedCount} removed`
+              : `${pageCount} pages`}
+          </span>
           <button className="btn ghost sm" title="Close this file" onClick={closeFile}>
             Close
           </button>
@@ -309,7 +401,28 @@ export default function App() {
           </section>
 
           <section className="section">
-            <h2><span className="step">02</span>Paper</h2>
+            <h2><span className="step">02</span>Pages</h2>
+            <PagesPanel
+              pageCount={pageCount}
+              keptCount={selection.keptCount}
+              removedCount={selection.removedCount}
+              ranges={keptRanges}
+              invalid={rangeError}
+              notice={selection.notice}
+              canUndo={selection.canUndo}
+              scanning={blankScan}
+              onApply={applyRanges}
+              onRemoveBlanks={removeBlanks}
+              onCancelScan={cancelBlanks}
+              onInvert={selection.invert}
+              onRestoreAll={selection.restoreAll}
+              onUndo={selection.undo}
+              onOpenGrid={() => setView("pages")}
+            />
+          </section>
+
+          <section className="section">
+            <h2><span className="step">03</span>Paper</h2>
             <Field label="Sheet size"
               hint={isBooklet ? "Sheets print landscape, two pages per side." : undefined}>
               <Select value={settings.paperId} onChange={(v) => set("paperId", v)}
@@ -329,7 +442,7 @@ export default function App() {
           </section>
 
           <section className="section">
-            <h2><span className="step">03</span>Margins</h2>
+            <h2><span className="step">04</span>Margins</h2>
             <Field label="">
               <Switch label="Trim page margins"
                 sub={scanning ? "Measuring content…" : detected ? "Content measured automatically" : "Detects the printed area"}
@@ -359,7 +472,7 @@ export default function App() {
 
           {isBooklet && (
             <section className="section">
-              <h2><span className="step">04</span>Printing</h2>
+              <h2><span className="step">05</span>Printing</h2>
               <Field label="Duplex flip"
                 hint="If the back of a sheet comes out upside down, switch this.">
                 <Segmented value={settings.duplexFlip} onChange={(v) => set("duplexFlip", v)}
@@ -408,18 +521,46 @@ export default function App() {
 
         <main>
           <Preview src={output?.url ?? null} layout={output?.layout ?? []}
-            binding={settings.binding} busy={building} sheetCount={output?.sheets ?? sheets} />
+            binding={settings.binding} busy={building} sheetCount={output?.sheets ?? sheets}
+            view={view} onView={setView}
+            pages={
+              <div className="contact">
+                <div className="contact-bar">
+                  <span className="folio-line">
+                    {selection.removedCount
+                      ? `${selection.keptCount} of ${pageCount} pages kept`
+                      : `${pageCount} pages`}
+                  </span>
+                  <div className="spacer" />
+                  {selection.removedCount > 0 && (
+                    <button type="button" className="btn sm ghost"
+                      aria-pressed={hideRemoved}
+                      onClick={() => setHideRemoved((v) => !v)}>
+                      {hideRemoved ? "Show removed" : "Hide removed"}
+                    </button>
+                  )}
+                  <button type="button" className="btn sm ghost" onClick={selection.undo}
+                    disabled={!selection.canUndo}>Undo</button>
+                </div>
+                <PageGrid pageCount={pageCount} removed={selection.removed}
+                  hidden={hideRemoved} onToggle={selection.toggle}
+                  onRemove={selection.remove} onRestore={selection.restore}
+                  drawThumbnail={drawThumbnail} />
+              </div>
+            } />
           <div className="colophon">
-            <Stat k="Source" v={`${pageCount} pages`} />
+            <Stat k="Source" v={selection.removedCount
+              ? `${selection.keptCount} of ${pageCount} pages`
+              : `${pageCount} pages`} />
             {isBooklet ? (
               <>
                 <Stat k="Sheets of paper" v={`${output?.sheets ?? sheets}`} />
                 <Stat k="Printed sides" v={`${output?.pages ?? sheets * 2}`} />
-                <Stat k="Blank slots" v={`${output?.blanks ?? blankCount(pageCount)}`} />
+                <Stat k="Blank slots" v={`${output?.blanks ?? blankCount(selection.keptCount)}`} />
                 <Stat k="Duplex" v={settings.duplexFlip === "short" ? "Flip short edge" : "Flip long edge"} />
               </>
             ) : (
-              <Stat k="Output pages" v={`${output?.pages ?? pageCount}`} />
+              <Stat k="Output pages" v={`${output?.pages ?? selection.keptCount}`} />
             )}
             {settings.cropEnabled && (
               <Stat k="Trimmed" v={settings.uniformCrop

@@ -110,6 +110,76 @@ describe("buildBooklet", () => {
     expect(out.layout.map((s) => [s.left, s.right])).toEqual([[4, 1], [2, 3]]);
   });
 
+  test("omitting the page selection keeps every page", async () => {
+    const src = await sourcePdf(8);
+    const all = await buildBooklet(src, { binding: "saddle", paperId: "a4" });
+    const explicit = await buildBooklet(src, {
+      binding: "saddle", paperId: "a4", pages: [1, 2, 3, 4, 5, 6, 7, 8],
+    });
+    expect(explicit.pages).toBe(all.pages);
+    expect(explicit.layout).toEqual(all.layout);
+  });
+
+  test("removing pages imposes over what is left", async () => {
+    const out = await buildBooklet(await sourcePdf(10), {
+      binding: "saddle", paperId: "a4", pages: [1, 2, 3, 4, 5, 6, 8, 10],
+    });
+    expect(out.pages).toBe(4);
+    expect(out.sheets).toBe(2);
+    expect(out.blanks).toBe(0);
+    // Slots hold source page numbers, not positions in the selection.
+    expect(out.layout.map((s) => [s.left, s.right])).toEqual([
+      [10, 1], [2, 8], [6, 3], [4, 5],
+    ]);
+  });
+
+  test("an out-of-order, duplicated selection is normalised", async () => {
+    const out = await buildBooklet(await sourcePdf(8), {
+      binding: "perfect", paperId: "a4", pages: [5, 1, 5, 3, 99, 0, 7],
+    });
+    expect(out.layout.map((s) => [s.left, s.right])).toEqual([[1, 5], [3, 7]]);
+  });
+
+  test("per-page crops stay attached to their source pages", async () => {
+    // Page 3 is cropped hard; removing page 2 must not slide that crop onto
+    // another page. The tell is the placed height of page 3 in the output.
+    const crop = Array.from({ length: 4 }, (_, i) => (
+      i === 2
+        ? { left: 0.3, top: 0.3, right: 0.3, bottom: 0.3 }
+        : { left: 0, top: 0, right: 0, bottom: 0 }
+    ));
+    const whole = await buildBooklet(await sourcePdf(4), {
+      binding: "none", paperId: "source", crop,
+    });
+    const trimmed = await buildBooklet(await sourcePdf(4), {
+      binding: "none", paperId: "source", crop, pages: [1, 3, 4],
+    });
+    const wholeSizes = await sizesOf(whole.bytes);
+    const trimmedSizes = await sizesOf(trimmed.bytes);
+    expect(trimmed.pages).toBe(3);
+    // "source" paper takes each page's own (cropped) size, so page 3 keeps its
+    // small box at index 2 before the removal and index 1 after it.
+    expect(trimmedSizes[1]).toEqual(wholeSizes[2]!);
+    expect(trimmedSizes[0]).toEqual(wholeSizes[0]!);
+  });
+
+  test("margins-only emits one page per kept page", async () => {
+    const out = await buildBooklet(await sourcePdf(6), {
+      binding: "none", paperId: "a4", pages: [2, 4, 6],
+    });
+    expect(out.pages).toBe(3);
+    expect(await sizesOf(out.bytes)).toHaveLength(3);
+  });
+
+  test("rejects a selection that keeps no pages", async () => {
+    expect(
+      buildBooklet(await sourcePdf(4), { binding: "saddle", paperId: "a4", pages: [] }),
+    ).rejects.toThrow("No pages are selected.");
+    expect(
+      buildBooklet(await sourcePdf(4), { binding: "saddle", paperId: "a4", pages: [99] }),
+    ).rejects.toThrow("No pages are selected.");
+  });
+
   test("rejects a document with no usable pages", async () => {
     const doc = await PDFDocument.create();
     doc.addPage([200, 200]);

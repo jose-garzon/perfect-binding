@@ -1,14 +1,4 @@
-# magazine-app-shell Specification
-
-## Purpose
-
-The magazine app shell is the layout of the Perfect Binding window: a masthead, a
-left column of numbered settings sections, the built booklet presented as a sheet on
-a plate, a colophon of statistics beneath it, and a cover screen shown before a
-document is loaded. It arranges the imposition workflow as a magazine spread and
-holds together across desktop window sizes.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Masthead
 
@@ -73,25 +63,6 @@ the contact sheet.
 
 - **WHEN** the column's content is taller than the window
 - **THEN** the column scrolls on its own and the preview and colophon stay in place
-
-### Requirement: Binding directory cards
-
-The four binding methods SHALL be presented as selectable entries, each pairing its
-diagram with a title and a one-line description, separated by hairline rules. The
-selected entry SHALL be distinguished by its border and ground and SHALL carry
-`aria-pressed="true"`. Each entry's text SHALL begin with its title.
-
-#### Scenario: Choosing a method
-
-- **WHEN** the user activates the "Perfect binding" entry
-- **THEN** that entry becomes the pressed one, the others release, and the preview
-  rebuilds for the new imposition
-
-#### Scenario: Diagrams match the design system
-
-- **WHEN** the entries are displayed
-- **THEN** each diagram is drawn in the ink and rule tokens at the system's stroke
-  weight, in both light and dark palettes
 
 ### Requirement: Preview plate
 
@@ -167,49 +138,3 @@ margin trimming is on, the trimmed amount SHALL be included.
 - **WHEN** margin trimming is enabled
 - **THEN** a trimmed statistic appears reporting how much width and height was
   removed, and it updates as the crop changes
-
-### Requirement: Cover screen before a document is loaded
-
-With no document open, the app SHALL present a cover: a display headline, a serif
-standfirst, and a dropzone presented as a framed plate. Below the cover the four
-binding methods SHALL be laid out as a directory grid of hairline cells, each with
-its diagram, name, and description. Load failures SHALL be reported on this screen.
-
-#### Scenario: First launch
-
-- **WHEN** the app opens with no document
-- **THEN** the cover shows the headline, standfirst, dropzone, and the four-method
-  directory
-
-#### Scenario: Dropping a PDF
-
-- **WHEN** a PDF is dropped on the plate or chosen through the file picker
-- **THEN** the cover is replaced by the document screen with that file loaded
-
-#### Scenario: Drag feedback
-
-- **WHEN** a file is dragged over the plate
-- **THEN** the plate visibly responds, and returns to rest when the drag leaves
-
-#### Scenario: An unreadable file
-
-- **WHEN** a file that is not a readable PDF is dropped
-- **THEN** an error message is shown on the cover and no document screen is entered
-
-### Requirement: Layout holds at desktop window sizes
-
-The shell SHALL remain usable as the window is resized: the section column keeps a
-fixed width while the preview takes the remaining space, the sheet is scaled to fit
-the plate, and the directory grid reduces its column count in a narrow window.
-
-#### Scenario: Narrow window
-
-- **WHEN** the window is narrowed toward the minimum usable desktop width
-- **THEN** no content is clipped or overlapped, the preview stays visible, and the
-  directory grid drops to fewer columns
-
-#### Scenario: Resizing with a sheet on screen
-
-- **WHEN** the window is resized while a sheet is displayed
-- **THEN** the sheet re-renders scaled to the new plate size without becoming blurry
-  or overflowing

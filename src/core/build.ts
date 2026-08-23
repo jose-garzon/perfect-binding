@@ -8,6 +8,11 @@ export interface BuildOptions {
   binding: Binding | "none";
   /** Paper id from PAPER_SIZES, or "source" to keep the document's own size. */
   paperId: string;
+  /**
+   * Source pages that take part, 1-based. Omitted or null means every page.
+   * Order is ignored: the list is normalised to an ascending set.
+   */
+  pages?: number[] | null;
   /** Whitespace to cut, as page fractions. One entry per page, or one for all. */
   crop?: Bounds | Bounds[] | null;
   /** Outer white border in points. */
@@ -44,15 +49,18 @@ export async function buildBooklet(
   const pageCount = src.getPageCount();
   if (pageCount === 0) throw new Error("This PDF has no pages.");
 
+  const kept = keptPages(opts.pages, pageCount);
+  if (kept.length === 0) throw new Error("No pages are selected.");
+
   const out = await PDFDocument.create();
   out.setProducer("Perfect Binding");
   out.setCreator("Perfect Binding");
 
   // Pages with no content stream (genuinely blank ones) cannot be embedded,
   // so they are dropped here and rendered as empty slots downstream.
-  const printable = Array.from({ length: pageCount }, (_, i) => i).filter(
-    (i) => src.getPage(i).node.Contents() !== undefined,
-  );
+  const printable = kept
+    .map((p) => p - 1)
+    .filter((i) => src.getPage(i).node.Contents() !== undefined);
   const boxes = printable.map((i) => {
     const b = cropFor(opts.crop, i);
     const { width, height } = src.getPage(i).getSize();
@@ -74,9 +82,9 @@ export async function buildBooklet(
   const gutter = opts.gutter ?? 0;
 
   if (opts.binding === "none") {
-    const total = pageCount;
+    const total = kept.length;
     for (let i = 0; i < total; i++) {
-      const ep = embedded[i];
+      const ep = embedded[kept[i]! - 1];
       const size = sheetSize(opts.paperId, ep ?? sample, false);
       const page = out.addPage([size.width, size.height]);
       if (ep) {
@@ -93,13 +101,20 @@ export async function buildBooklet(
     return { bytes, pages: total, sheets: Math.ceil(total / 2), blanks: 0, layout: [] };
   }
 
+  // Imposition is pure page-count math over the kept pages, so its slot numbers
+  // are positions in `kept`. They are translated back to source page numbers
+  // here, once, and everything downstream speaks source pages again.
   const layout = impose({
     binding: opts.binding,
-    pageCount,
+    pageCount: kept.length,
     sheetsPerSignature: opts.sheetsPerSignature,
     duplexFlip: opts.duplexFlip,
     rtl: opts.rtl,
-  });
+  }).map((side) => ({
+    ...side,
+    left: toSource(side.left, kept),
+    right: toSource(side.right, kept),
+  }));
 
   const size = sheetSize(opts.paperId, sample, true);
   const half = size.width / 2;
@@ -139,6 +154,21 @@ export async function buildBooklet(
     0,
   );
   return { bytes, pages: layout.length, sheets: layout.length / 2, blanks, layout };
+}
+
+/** Normalises the kept-page option to an ascending, deduplicated, in-range list. */
+function keptPages(pages: BuildOptions["pages"], pageCount: number): number[] {
+  if (!pages) return Array.from({ length: pageCount }, (_, i) => i + 1);
+  const seen = new Set<number>();
+  for (const p of pages) {
+    if (Number.isInteger(p) && p >= 1 && p <= pageCount) seen.add(p);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+/** Turns a slot number (a position in `kept`) into a source page number. */
+function toSource(slot: number | null, kept: number[]): number | null {
+  return slot === null ? null : kept[slot - 1] ?? null;
 }
 
 function cropFor(crop: BuildOptions["crop"], i: number): Bounds | null {

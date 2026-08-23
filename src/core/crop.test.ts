@@ -1,5 +1,7 @@
 import { test, expect, describe } from "bun:test";
-import { detectMargins, unionMargins, robustMargins, toBox, type Bounds } from "./crop";
+import {
+  detectMargins, inkCoverage, unionMargins, robustMargins, toBox, type Bounds,
+} from "./crop";
 
 /** Paints a white page with one black rectangle, in pixel coordinates. */
 function page(w: number, h: number, rect?: { x: number; y: number; w: number; h: number }) {
@@ -93,5 +95,28 @@ describe("toBox", () => {
   test("flips to PDF coordinates", () => {
     const box = toBox({ left: 0.1, top: 0.25, right: 0.1, bottom: 0.5 }, 100, 200);
     expect(box).toEqual({ left: 10, bottom: 100, right: 90, top: 150 });
+  });
+});
+
+describe("inkCoverage", () => {
+  test("a blank page has no ink", () => {
+    const p = page(50, 50);
+    expect(inkCoverage(p.data, p.w, p.h)).toBe(0);
+  });
+
+  test("sparse content reports a small fraction", () => {
+    const p = page(100, 100, { x: 10, y: 10, w: 5, h: 5 });
+    expect(inkCoverage(p.data, p.w, p.h)).toBeCloseTo(0.0025, 4);
+  });
+
+  test("a full-bleed page reports near-total coverage", () => {
+    const p = page(40, 40, { x: 0, y: 0, w: 40, h: 40 });
+    expect(inkCoverage(p.data, p.w, p.h)).toBe(1);
+  });
+
+  test("transparent pixels count as paper", () => {
+    const p = page(10, 10);
+    for (let i = 3; i < p.data.length; i += 4) p.data[i] = 0;
+    expect(inkCoverage(p.data, p.w, p.h)).toBe(0);
   });
 });

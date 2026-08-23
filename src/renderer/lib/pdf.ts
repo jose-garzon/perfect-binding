@@ -1,6 +1,6 @@
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
-import { detectMargins, robustMargins, type Bounds } from "../../core/crop";
+import { detectMargins, inkCoverage, robustMargins, type Bounds } from "../../core/crop";
 
 // The worker file is copied next to index.html by the dev server and the build.
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdf.worker.min.mjs", document.baseURI).href;
@@ -55,6 +55,99 @@ export async function renderPage(
   }
 }
 
+/* ── thumbnails ───────────────────────────────────────────────────────────── */
+
+/**
+ * Thumbnail work shares the pdf.js worker with the margin scan and the preview,
+ * both of which the user is waiting on. A queue of depth one keeps the contact
+ * sheet strictly in the background: tiles render one at a time, and a tile that
+ * scrolls away before its turn simply never runs.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+const THUMB_LIMIT = 200;
+/** page number -> bitmap, in insertion order, oldest evicted first. */
+let thumbs = new Map<number, ImageBitmap>();
+let thumbsFor: PDFDocumentProxy | null = null;
+
+function cacheFor(doc: PDFDocumentProxy): Map<number, ImageBitmap> {
+  if (thumbsFor !== doc) {
+    for (const bitmap of thumbs.values()) bitmap.close();
+    thumbs = new Map();
+    thumbsFor = doc;
+  }
+  return thumbs;
+}
+
+/** Drops every cached bitmap. Called when a document is closed or replaced. */
+export function clearThumbnails(): void {
+  for (const bitmap of thumbs.values()) bitmap.close();
+  thumbs = new Map();
+  thumbsFor = null;
+}
+
+/**
+ * Renders one source page small, cached as a bitmap. Resolves to null when the
+ * work was cancelled before it ran or while it was running.
+ */
+export function renderThumbnail(
+  doc: PDFDocumentProxy,
+  pageNumber: number,
+  width: number,
+  signal?: AbortSignal,
+): Promise<ImageBitmap | null> {
+  const cache = cacheFor(doc);
+  const hit = cache.get(pageNumber);
+  if (hit) {
+    // Refresh its place in the eviction order.
+    cache.delete(pageNumber);
+    cache.set(pageNumber, hit);
+    return Promise.resolve(hit);
+  }
+
+  const run = queue.then(async () => {
+    if (signal?.aborted) return null;
+    const cached = cacheFor(doc).get(pageNumber);
+    if (cached) return cached;
+
+    const page = await doc.getPage(pageNumber);
+    try {
+      const base = page.getViewport({ scale: 1 });
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const viewport = page.getViewport({ scale: (width * dpr) / base.width });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.ceil(viewport.width));
+      canvas.height = Math.max(1, Math.ceil(viewport.height));
+      const ctx = canvas.getContext("2d", { alpha: false })!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvas, canvasContext: ctx, viewport } as never).promise;
+      if (signal?.aborted) return null;
+      const bitmap = await createImageBitmap(canvas);
+      const store = cacheFor(doc);
+      store.set(pageNumber, bitmap);
+      while (store.size > THUMB_LIMIT) {
+        const oldest = store.keys().next();
+        if (oldest.done) break;
+        store.get(oldest.value)?.close();
+        store.delete(oldest.value);
+      }
+      return bitmap;
+    } catch (err) {
+      if ((err as Error)?.name === "RenderingCancelledException") return null;
+      throw err;
+    } finally {
+      page.cleanup();
+    }
+  });
+
+  // The queue must survive a failed tile, so it chains on the settled promise.
+  queue = run.catch(() => {});
+  return run;
+}
+
+/* ── scanning ─────────────────────────────────────────────────────────────── */
+
 export interface CropScan {
   /** One entry per source page. */
   perPage: Bounds[];
@@ -103,4 +196,41 @@ export async function scanMargins(
     perPage.push(near);
   }
   return { perPage, shared: robustMargins([...sampled.values()]) };
+}
+
+/** How little ink a page may carry and still count as blank. */
+const BLANK_FLOOR = 0.0008;
+
+/**
+ * Measures every page and reports which ones are blank. This is a full pass on
+ * purpose: `scanMargins` samples long documents, and `detectMargins` reports the
+ * same "no margins" for a blank page and a full-bleed one, so neither can be
+ * trusted to decide what gets removed.
+ */
+export async function scanBlanks(
+  doc: PDFDocumentProxy,
+  onProgress?: (done: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<number[]> {
+  const total = doc.numPages;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true })!;
+
+  const blank: number[] = [];
+  for (let n = 1; n <= total; n++) {
+    if (signal?.aborted) throw new DOMException("Scan cancelled", "AbortError");
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(1, 300 / base.width) });
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvas, canvasContext: ctx, viewport } as never).promise;
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    if (inkCoverage(data, canvas.width, canvas.height) < BLANK_FLOOR) blank.push(n);
+    page.cleanup();
+    onProgress?.(n, total);
+  }
+  return blank;
 }

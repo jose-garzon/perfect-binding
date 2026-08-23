@@ -75,6 +75,29 @@ export function detectMargins(
   };
 }
 
+/**
+ * Fraction of the page covered in ink, 0-1. `detectMargins` cannot tell a blank
+ * page from a full-bleed one — both report no margins — so blankness is judged
+ * on coverage instead.
+ */
+export function inkCoverage(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opts: Pick<DetectOptions, "threshold"> = {},
+): number {
+  const threshold = opts.threshold ?? 245;
+  let ink = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3]!;
+    if (a === 0) continue; // transparent renders as paper
+    const lum = 0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
+    const onWhite = lum * (a / 255) + 255 * (1 - a / 255);
+    if (onWhite < threshold) ink++;
+  }
+  return width * height === 0 ? 0 : ink / (width * height);
+}
+
 function firstInk(ink: Uint32Array, span: number, noiseFloor: number): number {
   const min = Math.max(1, Math.floor(span * noiseFloor));
   for (let i = 0; i < ink.length; i++) if (ink[i]! >= min) return i;

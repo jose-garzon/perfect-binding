@@ -16,6 +16,11 @@ Everything runs locally — the PDF never leaves the machine.
 - **Four ways to bind.** Stitched (saddle), folded & glued, perfect binding, or
   margins-only with no reordering at all. Each one is explained in the app, in
   the [section below](#what-the-four-modes-do), and drawn on the card you pick.
+- **Drop pages without leaving the app.** Switch the plate to the contact sheet,
+  click a page to remove it or shift-click a run, or type the pages you want as
+  ranges (`1-4, 9, 12-`). Removed pages stay in place, dimmed and struck
+  through, and `Ctrl/Cmd+Z` puts them back. *Remove blanks* measures every page
+  and drops the empty ones. The source file is never modified.
 - **Automatic margin trimming.** Every page is scanned for its content box, the
   results are merged across the document, and the crop is scaled back up to fill
   the sheet. Nudge any edge by hand if the detector clips something.
@@ -123,6 +128,21 @@ and the book is in order, ready to glue.
 **Margins only.** No reordering. The detected content box is cropped and scaled
 up to fill the paper — useful for academic PDFs with enormous margins.
 
+## Page selection
+
+Removal is a selection, not an edit: the app keeps the set of removed source
+pages and passes the kept ones to the builder, so the loaded bytes stay
+untouched and any removal can be undone. Imposition is computed over the kept
+count, which is why dropping two pages can save a whole sheet — the colophon
+updates as you go. Per-page crops stay attached to their own source page, so a
+removal never slides a crop onto its neighbour.
+
+Blank detection is deliberately separate from the margin scan. That scan samples
+long documents, and the whitespace detector reports the same "no margins" for a
+blank page as for a full-bleed one — so *Remove blanks* runs its own full,
+cancellable pass over the ink coverage of every page, and says how many it
+removed.
+
 ## Margin detection
 
 Each page is rendered small with pdf.js and scanned for non-white pixels. Rows
@@ -156,6 +176,14 @@ out of the bundler's reach: the paths pass through untouched, `build.ts` copies
 the files into `dist/fonts/`, and `server.ts` serves them in dev. Any future
 typeface has to follow the same route.
 
+**Contact-sheet thumbnails run behind everything else.** The margin scan, the
+preview, and the thumbnail grid share one pdf.js worker, and the first two are
+what the user is waiting on. Thumbnails render through a serial queue in
+`lib/pdf.ts`, are gated by an `IntersectionObserver` per tile, cancel when a
+tile scrolls away, and are cached as bitmaps in a bounded LRU. On a 300-page
+document about 18 tiles are painted at rest and the booklet still rebuilds
+within a second of a change.
+
 **Canvas renders are cancelled, not stacked.** pdf.js refuses to paint a canvas
 that is already being painted, which React Strict Mode triggers constantly.
 `renderPage` cancels any in-flight task for that canvas first.
@@ -169,7 +197,9 @@ src/core/         pure logic, no DOM — unit tested
   build.ts        pdf-lib output assembly
   paper.ts        paper sizes in points
 src/renderer/     React UI (no framework beyond React + hand-written CSS)
-  lib/pdf.ts      pdf.js loading, page rendering, margin scanning
+  lib/pdf.ts      pdf.js loading, page rendering, thumbnails, margin + blank scans
+  lib/ranges.ts   the `1-4, 9, 12-` page-range syntax, parsed and formatted
+  lib/selection.ts  which pages are kept, with undo — no bytes are touched
   fonts/          Archivo and Newsreader, Latin subsets, SIL OFL (see OFL.txt)
 electron/         main, preload, the CSP response header, and the update check
 scripts/          dev launcher, icon rasteriser, screenshots, smoke test

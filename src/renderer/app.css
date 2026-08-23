@@ -541,3 +541,109 @@ input[type="range"]:disabled { opacity: .35; }
 }
 .link-btn:hover { color: var(--ink); text-decoration: underline; }
 .link-btn:focus-visible { outline: 2px solid var(--spot); outline-offset: 2px; }
+
+/* ── page selection ───────────────────────────────────────────────────────── */
+
+/* text field for the kept-page ranges */
+input.control {
+  width: 100%; padding: 9px 10px; border-radius: var(--radius);
+  border: 1px solid var(--rule-strong); background: var(--surface);
+  font-family: var(--font-grotesque); font-size: var(--t-2); color: var(--ink);
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+}
+input.control:hover { border-color: var(--ink); }
+input.control.invalid { border-color: var(--spot); background: var(--spot-wash); }
+
+.notice {
+  margin: -8px 0 14px; font-family: var(--font-serif);
+  font-size: var(--t-2); line-height: 1.5; color: var(--ink-3);
+}
+.notice.bad { color: var(--spot); }
+
+.row-actions {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px;
+}
+
+/* the plate's two views */
+.view-switch {
+  display: flex; flex: none;
+  border: 1px solid var(--rule-strong); border-radius: var(--radius); overflow: hidden;
+}
+.view-switch button {
+  border: none; border-left: 1px solid var(--rule-strong);
+  background: transparent; padding: 5px 12px; cursor: pointer;
+  font-family: var(--font-grotesque); font-size: var(--t-1); font-weight: 600;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3);
+  transition: background .13s ease, color .13s ease;
+}
+.view-switch button:first-child { border-left: none; }
+.view-switch button:hover { color: var(--ink); }
+.view-switch button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+.plate.pages { display: block; place-items: stretch; padding: 0; }
+
+.contact { display: flex; flex-direction: column; min-height: 100%; }
+.contact-bar {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 24px; background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* the contact sheet */
+.page-grid {
+  display: grid; gap: 22px 18px; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile, 128px), 1fr));
+  padding: 24px;
+}
+.tile {
+  display: flex; flex-direction: column; gap: 7px; cursor: pointer;
+  width: 100% !important; /* the grid track decides the width, not the tile */
+}
+.tile-plate {
+  position: relative; border: 1px solid var(--rule-strong); background: var(--surface);
+  aspect-ratio: 1 / 1.414; overflow: hidden;
+  transition: border-color .13s ease, box-shadow .13s ease;
+}
+.tile:hover .tile-plate { border-color: var(--ink); }
+.tile canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+.tile-placeholder {
+  position: absolute; inset: 0; background:
+    repeating-linear-gradient(135deg, var(--rule) 0 1px, transparent 1px 7px);
+  opacity: .5;
+}
+.tile.selected .tile-plate {
+  border-color: var(--spot); box-shadow: inset 0 0 0 2px var(--spot-wash);
+}
+.tile:focus-visible { outline: none; }
+.tile:focus-visible .tile-plate { outline: 2px solid var(--spot); outline-offset: 2px; }
+
+/* removed pages keep their slot: dimmed, struck through, still readable */
+.tile.removed .tile-plate { border-style: dashed; border-color: var(--rule-strong); }
+.tile.removed canvas { opacity: .3; filter: grayscale(1); }
+.tile .strike { display: none; }
+.tile.removed .strike {
+  display: block; position: absolute; left: -10%; right: -10%; top: 50%;
+  height: 1px; background: var(--spot); transform: rotate(-24deg); transform-origin: center;
+}
+.tile.removed .tile-folio .src { color: var(--ink-3); text-decoration: line-through; }
+
+.tile-action {
+  position: absolute; top: 5px; right: 5px; width: 22px; height: 22px;
+  display: grid; place-items: center; cursor: pointer;
+  border: 1px solid var(--rule-strong); border-radius: var(--radius);
+  background: var(--paper); color: var(--ink-3);
+  font-family: var(--font-grotesque); font-size: var(--t-2); line-height: 1;
+  opacity: 0; transition: opacity .12s ease, color .12s ease, border-color .12s ease;
+}
+.tile:hover .tile-action, .tile:focus-within .tile-action { opacity: 1; }
+.tile-action:hover { color: var(--spot); border-color: var(--spot); }
+
+.tile-folio {
+  display: flex; align-items: baseline; gap: 7px;
+  font-family: var(--font-grotesque); font-size: var(--t-1);
+  letter-spacing: .08em; text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+.tile-folio .src { color: var(--ink); font-weight: 600; }
+.tile-folio .out { color: var(--ink-3); }
