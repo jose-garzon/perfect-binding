@@ -4,7 +4,6 @@
  * file is not an error — it reads back as the defaults, so a bad write can
  * never stop the app from starting.
  */
-const { app } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 
@@ -31,6 +30,9 @@ const DEFAULTS = {
 };
 
 function settingsPath() {
+  // electron is resolved per call, not at load: a module cached before
+  // `electron` was mocked (as `bun test` does across files) still sees the mock.
+  const { app } = require("electron");
   return path.join(app.getPath("userData"), "settings.json");
 }
 
