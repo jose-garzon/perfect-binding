@@ -3,6 +3,8 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const { applyCsp } = require("./csp.cjs");
 const updates = require("./updates.cjs");
+const settings = require("./settings.cjs");
+const printing = require("./print.cjs");
 
 const DEV_URL = process.env.PB_DEV_URL;
 
@@ -54,6 +56,21 @@ ipcMain.handle("save-pdf", async (event, suggestedName, bytes) => {
   return true;
 });
 
+/* ── printing ─────────────────────────────────────────────────────────────
+   The booklet goes to the printer straight from the bytes the renderer built:
+   no export, no save dialog, nothing left on disk. See electron/print.cjs. */
+ipcMain.handle("print:printers", () => printing.listPrinters());
+
+ipcMain.handle("print:job", (_e, bytes, options) => printing.printBytes(bytes, options));
+
+/** Called with no argument this reads the preferences; with one, it merges it in. */
+ipcMain.handle("print:prefs", async (_e, patch) => {
+  const next = patch === undefined
+    ? await settings.readSettings()
+    : await settings.writeSettings({ print: patch });
+  return next.print;
+});
+
 /* ── update notices ───────────────────────────────────────────────────────
    The renderer never touches the network — it asks here, and gets back either
    a newer version or null. See electron/updates.cjs. */
@@ -83,6 +100,15 @@ app.whenReady().then(() => {
     {
       label: "File",
       submenu: [
+        {
+          label: "Print…",
+          accelerator: "CmdOrCtrl+P",
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win) win.webContents.send("print:open");
+          },
+        },
+        { type: "separator" },
         { label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
         { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },

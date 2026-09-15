@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { closePdf, loadPdf, renderPage } from "../lib/pdf";
 import type { SheetSide } from "../../core/imposition";
 import { SheetDiagram } from "./Diagrams";
+import { sourcePages } from "../lib/caption";
 
 /** The plate shows either the built booklet or the source document. */
 export type PlateView = "proof" | "pages";
@@ -13,7 +14,10 @@ export type PlateView = "proof" | "pages";
  * performance track, and a multi-megabyte typed array there blows up the
  * structured clone (DataCloneError) and corrupts the commit phase.
  */
-export function Preview({ src, layout, binding, busy, sheetCount, view, onView, pages }: {
+export function Preview({
+  src, layout, binding, busy, sheetCount, view, onView, pages,
+  index, onIndex, canPrint, printerName, onPrintSheet,
+}: {
   src: string | null;
   layout: SheetSide[];
   binding: "saddle" | "perfect" | "draft" | "none";
@@ -24,9 +28,16 @@ export function Preview({ src, layout, binding, busy, sheetCount, view, onView, 
   onView: (view: PlateView) => void;
   /** The contact sheet, supplied by the app so no pdf.js object is a prop. */
   pages: ReactNode;
+  /** Which side is on show. Held by the app, which prints what it names. */
+  index: number;
+  onIndex: (index: number) => void;
+  /** False in the browser build, where there is nothing to print silently with. */
+  canPrint: boolean;
+  /** The saved printer, named in the print control so a job has a destination. */
+  printerName: string | null;
+  onPrintSheet: () => void;
 }) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
-  const [index, setIndex] = useState(0);
   const [width, setWidth] = useState(760);
   const canvas = useRef<HTMLCanvasElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -39,7 +50,8 @@ export function Preview({ src, layout, binding, busy, sheetCount, view, onView, 
       if (stale) { closePdf(d); return; }
       opened = d;
       setDoc(d);
-      setIndex((i) => Math.min(i, d.numPages - 1));
+      // A rebuild can leave fewer sides than the one being looked at.
+      if (index > d.numPages - 1) onIndex(Math.max(0, d.numPages - 1));
     }).catch(() => setDoc(null));
     return () => { stale = true; closePdf(opened); };
   }, [src]);
@@ -82,7 +94,7 @@ export function Preview({ src, layout, binding, busy, sheetCount, view, onView, 
   });
 
   const total = doc?.numPages ?? 0;
-  const step = (d: number) => setIndex((i) => Math.min(total - 1, Math.max(0, i + d)));
+  const step = (d: number) => onIndex(Math.min(total - 1, Math.max(0, index + d)));
   const side = layout[index];
 
   const proof = view === "proof";
@@ -116,7 +128,7 @@ export function Preview({ src, layout, binding, busy, sheetCount, view, onView, 
                 ? <>Page {index + 1} <span>of {total}</span></>
                 : side
                   ? <>Sheet {side.sheet + 1} <span>of {sheetCount} · {side.side}
-                      {side.rotate180 ? " · rotated" : ""}</span></>
+                      {side.rotate180 ? " · rotated" : ""} · {sourcePages(side)}</span></>
                   : <>Side {index + 1} <span>of {total}</span></>}
             </div>
           </>
@@ -125,6 +137,14 @@ export function Preview({ src, layout, binding, busy, sheetCount, view, onView, 
         )}
         <div className="spacer" />
         {busy && <span className="busy"><i className="spinner" />Rebuilding…</span>}
+        {proof && canPrint && (
+          <button type="button" className="btn sm print-sheet" onClick={onPrintSheet}
+            title={printerName
+              ? `Print this ${binding === "none" ? "page" : "sheet"} on ${printerName}`
+              : "Choose a printer first"}>
+            {binding === "none" ? "Print page" : "Print sheet"}
+          </button>
+        )}
         {proof && <SheetDiagram binding={binding} />}
       </div>
     </section>

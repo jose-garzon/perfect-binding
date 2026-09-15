@@ -647,3 +647,47 @@ input.control.invalid { border-color: var(--spot); background: var(--spot-wash);
 }
 .tile-folio .src { color: var(--ink); font-weight: 600; }
 .tile-folio .out { color: var(--ink-3); }
+
+/* ── print panel ──────────────────────────────────────────────────────────
+   Print setup as a plate laid over the spread: the same hairlines and fields
+   as the settings column, but modal, because a job is about to leave for a
+   machine and the choices want reading before it does. */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 40;
+  display: grid; place-items: center; padding: 32px;
+  background: color-mix(in srgb, var(--ink) 34%, transparent);
+  animation: fade .14s ease;
+}
+@keyframes fade { from { opacity: 0; } }
+
+.modal {
+  display: flex; flex-direction: column;
+  width: min(460px, 100%); max-height: 100%;
+  background: var(--paper); border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-plate);
+  animation: rise .16s cubic-bezier(.32,.72,0,1);
+}
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+
+.modal-head {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  padding: 16px 24px; border-bottom: 1px solid var(--rule);
+}
+.modal-head h2 {
+  margin: 0; font-family: var(--font-grotesque); font-size: var(--t-1);
+  font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--ink);
+}
+
+.modal-body { padding: 26px 24px; overflow-y: auto; }
+.modal-body .notice { margin: -6px 0 18px; }
+
+.modal-foot {
+  flex: none; padding: 14px 24px;
+  border-top: 1px solid var(--rule); background: var(--surface);
+}
+.modal-foot .hint { margin: 0 0 12px; }
+.modal-foot .foot-actions { display: flex; align-items: center; gap: 10px; }
+.modal-foot .spacer { flex: 1; }
+
+/* the caption's own print control, next to the sheet navigation */
+.caption .print-sheet { flex: none; }

@@ -5,34 +5,12 @@
  * itself never leaves the machine, and the check can be switched off.
  */
 const { app, net } = require("electron");
-const path = require("node:path");
-const fs = require("node:fs/promises");
+const { readSettings, writeSettings } = require("./settings.cjs");
 
 const RELEASES_API = "https://api.github.com/repos/jose-garzon/perfect-binding/releases/latest";
 const RELEASES_PAGE = "https://github.com/jose-garzon/perfect-binding/releases/latest";
 const INTERVAL = 24 * 60 * 60 * 1000; // once a day is plenty for a desktop tool
 const TIMEOUT = 6000;
-
-const DEFAULTS = { updateChecks: true, lastCheck: 0, skipped: null };
-
-function settingsPath() {
-  return path.join(app.getPath("userData"), "settings.json");
-}
-
-async function readSettings() {
-  try {
-    return { ...DEFAULTS, ...JSON.parse(await fs.readFile(settingsPath(), "utf8")) };
-  } catch {
-    return { ...DEFAULTS }; // missing or corrupt: fall back, never throw
-  }
-}
-
-async function writeSettings(patch) {
-  const next = { ...(await readSettings()), ...patch };
-  await fs.mkdir(path.dirname(settingsPath()), { recursive: true });
-  await fs.writeFile(settingsPath(), JSON.stringify(next, null, 2));
-  return next;
-}
 
 /** -1, 0, or 1. Numeric fields only; a prerelease suffix sorts below its release. */
 function compareVersions(a, b) {
@@ -90,4 +68,6 @@ async function checkForUpdate({ force = false } = {}) {
   return { version: latest, url: release.html_url || RELEASES_PAGE, current: app.getVersion() };
 }
 
+// `readSettings`/`writeSettings` now live in settings.cjs, shared with the
+// print preferences; they stay exported here so callers do not care.
 module.exports = { checkForUpdate, readSettings, writeSettings, compareVersions, RELEASES_PAGE };

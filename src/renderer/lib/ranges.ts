@@ -70,3 +70,37 @@ export function formatRanges(kept: Iterable<number>): string {
   }
   return parts.join(", ");
 }
+
+/** A printer page range, 0-based and inclusive, as Electron's print API takes it. */
+export interface PageRange {
+  from: number;
+  to: number;
+}
+
+/**
+ * Maps sheets of paper onto the output pages that carry them, for printing.
+ *
+ * Everything in the app is counted in sheets, but a printer is told which pages
+ * of the built document to run. A two-up sheet is two output pages — sheet `n`
+ * is pages `2n-1` and `2n`, 0-based `2n-2` and `2n-1` — while a margins-only
+ * job puts one source page on one output page, so the two counts coincide.
+ * Adjacent sheets are coalesced, so `1-10` leaves as one range and not ten.
+ */
+export function sheetsToPageRanges(sheets: Iterable<number>, twoUp: boolean): PageRange[] {
+  const sorted = [...new Set(sheets)].filter((n) => n >= 1).sort((a, b) => a - b);
+
+  const out: PageRange[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    const start = sorted[i]!;
+    let end = start;
+    while (i + 1 < sorted.length && sorted[i + 1] === end + 1) {
+      end = sorted[++i]!;
+    }
+    out.push(twoUp
+      ? { from: 2 * start - 2, to: 2 * end - 1 }
+      : { from: start - 1, to: end - 1 });
+    i++;
+  }
+  return out;
+}

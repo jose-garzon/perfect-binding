@@ -7,6 +7,7 @@ declare global {
   interface Window {
     desktop?: {
       savePdf: (suggestedName: string, bytes: Uint8Array) => Promise<boolean>;
+      print?: import("./lib/print").PrintBridge;
       updates?: {
         check: (force?: boolean) => Promise<import("./components/UpdateBar").Update | null>;
         enabled: (value?: boolean) => Promise<boolean>;

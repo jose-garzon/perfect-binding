@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { formatRanges, parseRanges } from "./ranges";
+import { formatRanges, parseRanges, sheetsToPageRanges } from "./ranges";
 
 const pages = (text: string, count = 20) => {
   const r = parseRanges(text, count);
@@ -61,5 +61,42 @@ describe("formatRanges", () => {
     const kept = [1, 2, 3, 4, 7, 8, 9, 20];
     const round = parseRanges(formatRanges(kept), 20);
     expect(round.ok && round.pages).toEqual(kept);
+  });
+});
+
+describe("sheetsToPageRanges", () => {
+  test("a run of two-up sheets becomes one page range", () => {
+    expect(sheetsToPageRanges([2, 3, 4], true)).toEqual([{ from: 2, to: 7 }]);
+  });
+
+  test("a scattered selection becomes as few ranges as possible", () => {
+    expect(sheetsToPageRanges([1, 4, 5], true)).toEqual([
+      { from: 0, to: 1 },
+      { from: 6, to: 9 },
+    ]);
+  });
+
+  test("a single sheet covers its two sides", () => {
+    expect(sheetsToPageRanges([7], true)).toEqual([{ from: 12, to: 13 }]);
+    expect(sheetsToPageRanges([1], true)).toEqual([{ from: 0, to: 1 }]);
+  });
+
+  test("a margins-only job maps a page to itself", () => {
+    expect(sheetsToPageRanges([3, 4, 5, 6], false)).toEqual([{ from: 2, to: 5 }]);
+    expect(sheetsToPageRanges([1], false)).toEqual([{ from: 0, to: 0 }]);
+  });
+
+  test("sorts, deduplicates, and drops anything below the first sheet", () => {
+    expect(sheetsToPageRanges([3, 1, 2, 2], true)).toEqual([{ from: 0, to: 5 }]);
+    expect(sheetsToPageRanges([0, -2, 1], true)).toEqual([{ from: 0, to: 1 }]);
+  });
+
+  test("nothing selected prints nothing", () => {
+    expect(sheetsToPageRanges([], true)).toEqual([]);
+  });
+
+  test("takes the parser's output directly", () => {
+    const parsed = parseRanges("2-4", 20);
+    expect(parsed.ok && sheetsToPageRanges(parsed.pages, true)).toEqual([{ from: 2, to: 7 }]);
   });
 });

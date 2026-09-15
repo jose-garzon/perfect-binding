@@ -28,6 +28,12 @@ Everything runs locally — the PDF never leaves the machine.
 - **A sheet-by-sheet proof.** Step through every sheet, front and back, with the
   fold line or the cut line drawn where it will fall — before you spend paper. A
   draft print is neither folded nor cut, so it gets no guide at all.
+- **Print without exporting.** `Ctrl/Cmd+P` opens a print panel with the
+  machine's printers, copies, duplex, colour, paper, and scale — saved and
+  restored next launch. Print everything, a range of sheets, or the one sheet
+  you are looking at; with a printer saved, *Print sheet* in the caption sends
+  it in a single click. The booklet goes to the printer straight from memory: no
+  export, no save dialog, nothing left on disk.
 - **The numbers that decide the print job.** Sheets of paper, printed sides,
   blank slots, duplex flip, and how much was trimmed, kept in view at all times.
 - **Paper and spine controls.** A4, Letter, Legal, A3, Tabloid, or A5; outer
@@ -164,6 +170,31 @@ Print double-sided, landscape, **at 100% scale** (no "fit to page" — it defeat
 the margin work). If the backs of your sheets come out upside down, flip the
 *Duplex flip* setting between short edge and long edge; that rotates the back
 sides 180° in the exported file.
+
+You can print from inside the app rather than exporting first. **Print** in the
+masthead, `Ctrl/Cmd+P`, or *File → Print…* opens the print panel: printer,
+copies, duplex, colour, paper, scale, and what the job covers — everything, a
+range, or the sheet on screen. Ranges are counted in sheets, in the same
+grammar as the page field (`1-4, 9, 12-`); one sheet is two pages of the built
+file. Everything you set is saved and comes back the next time you open the
+panel.
+
+Once a printer has been saved, *Print sheet* in the preview caption prints the
+sheet you are looking at — both sides — with no dialog at all. That is the
+button for the sheet that jammed. Before a printer has been chosen it opens the
+panel instead: nothing is ever sent silently to a printer you did not pick.
+
+Two notes on how it works. The booklet is written to a private temporary file,
+printed, and deleted; it is never saved anywhere you chose, and the file is
+removed again when the app quits. And the panel exists rather than the system
+dialog because the platform never reports back what was picked in its own
+dialog — nothing chosen there can be remembered. That dialog is still one click
+away in the panel, for driver settings the panel does not carry; it just saves
+nothing.
+
+*Duplex flip* and the panel's *Sides* are different settings. The first tells
+the imposition how your printer already behaves, so the backs land the right way
+up. The second asks the printer to use both sides of the paper.
 
 ## Three things worth knowing before changing the renderer
 

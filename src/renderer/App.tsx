@@ -7,13 +7,15 @@ import { FULL_PAGE, type Bounds } from "../core/crop";
 import {
   clearThumbnails, closePdf, loadPdf, renderPage, renderThumbnail, scanBlanks, scanMargins,
 } from "./lib/pdf";
-import { formatRanges, parseRanges } from "./lib/ranges";
+import { formatRanges, parseRanges, sheetsToPageRanges } from "./lib/ranges";
+import { DEFAULT_PRINT_PREFS, type PrintOptions, type PrintPrefs, type PrintResult } from "./lib/print";
 import { usePageSelection } from "./lib/selection";
 import { Dropzone } from "./components/Dropzone";
 import { Preview, type PlateView } from "./components/Preview";
 import { CropPanel } from "./components/CropPanel";
 import { PageGrid } from "./components/PageGrid";
 import { PagesPanel } from "./components/PagesPanel";
+import { PrintPanel } from "./components/PrintPanel";
 import { Field, Segmented, Select, Slider, Switch } from "./components/Controls";
 import {
   DraftDiagram, MarginsDiagram, PerfectDiagram, SaddleDiagram,
@@ -127,6 +129,10 @@ export default function App() {
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [printPrefs, setPrintPrefs] = useState<PrintPrefs>(DEFAULT_PRINT_PREFS);
+  const [printed, setPrinted] = useState(false);
+  const [side, setSide] = useState(0); // which sheet side the proof is showing
   const [view, setView] = useState<PlateView>("proof");
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [hideRemoved, setHideRemoved] = useState(false);
@@ -332,6 +338,95 @@ export default function App() {
   }, [output, file, settings.binding, selection.keptCount, selection.removedCount, pageCount]);
 
 
+  /* ── printing ───────────────────────────────────────────────────────────
+     The built bytes go to the printer as they are: no export, no save dialog,
+     nothing left on disk. The desktop writes them to a private temporary file
+     and removes it again — see electron/print.cjs. */
+
+  /** The saved preferences, so the caption knows whether a printer is set. */
+  useEffect(() => {
+    const bridge = window.desktop?.print;
+    if (!bridge) return;
+    let stale = false;
+    bridge.prefs().then((p) => { if (!stale) setPrintPrefs(p); }).catch(() => {});
+    return () => { stale = true; };
+  }, [printOpen]); // re-read after the panel has had a chance to save
+
+  const sendJob = useCallback(async (options: PrintOptions): Promise<PrintResult> => {
+    const bytes = built.current;
+    const bridge = window.desktop?.print;
+    if (!bytes) return { ok: false, reason: "There is nothing built to print yet." };
+    if (!bridge) return { ok: false, reason: "Printing needs the desktop app." };
+    const result = await bridge.job(bytes, options);
+    if (result.ok) {
+      setPrinted(true);
+      setTimeout(() => setPrinted(false), 2200);
+    }
+    return result;
+  }, []);
+
+  /** Without the desktop bridge there is no panel — the browser's dialog does it. */
+  const printInBrowser = useCallback(() => {
+    const url = output?.url;
+    if (!url) return;
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+    frame.src = url;
+    frame.onload = () => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        window.open(url, "_blank"); // some browsers will not print a framed PDF
+      }
+      // Long enough for the dialog to have taken the document from the frame.
+      setTimeout(() => frame.remove(), 60_000);
+    };
+    document.body.appendChild(frame);
+  }, [output]);
+
+  const openPrint = useCallback(() => {
+    if (!built.current) return;
+    if (!window.desktop?.print) { printInBrowser(); return; }
+    setPrintOpen(true);
+  }, [printInBrowser]);
+
+  /** One click from the caption: the sheet on show, both its sides. */
+  const printCurrentSheet = useCallback(async () => {
+    const bridge = window.desktop?.print;
+    // No printer chosen yet, so there is nothing to print silently with: the
+    // first print is always a deliberate one.
+    if (!bridge || !printPrefs.deviceName) { openPrint(); return; }
+    const twoUp = settings.binding !== "none";
+    const sheet = twoUp ? Math.floor(side / 2) + 1 : side + 1;
+    const result = await sendJob({
+      ...printPrefs,
+      pageRanges: sheetsToPageRanges([sheet], twoUp),
+      silent: true,
+    });
+    // A printer that has gone away is worth saying out loud, and the panel is
+    // where it gets fixed.
+    if (!result.ok && !result.cancelled) {
+      setError(result.reason ?? "The sheet could not be printed.");
+      setPrintOpen(true);
+    }
+  }, [printPrefs, settings.binding, side, sendJob, openPrint]);
+
+  /* Ctrl/Cmd+P opens the panel rather than the browser's own print. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      if (file) openPrint();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [file, openPrint]);
+
+  /* The File → Print… menu item arrives here. */
+  useEffect(() => window.desktop?.print?.onOpen(() => { if (file) openPrint(); }), [file, openPrint]);
+
   const sheets = selection.keptCount ? sheetsFor(selection.keptCount) : 0;
   const keptRanges = useMemo(
     () => formatRanges(selection.kept),
@@ -372,6 +467,10 @@ export default function App() {
           <input type="file" accept="application/pdf,.pdf" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) openFile(f); e.target.value = ""; }} />
         </label>
+        <button className="btn" onClick={openPrint} disabled={!output || building}
+          title="Print the booklet (Ctrl+P)">
+          {printed ? "Sent ✓" : "Print"}
+        </button>
         <button className="btn primary" onClick={exportPdf} disabled={!output || building}>
           {saved ? "Saved ✓" : "Export PDF"}
         </button>
@@ -517,7 +616,10 @@ export default function App() {
         <main>
           <Preview src={output?.url ?? null} layout={output?.layout ?? []}
             binding={settings.binding} busy={building} sheetCount={output?.sheets ?? sheets}
-            view={view} onView={setView}
+            view={view} onView={setView} index={side} onIndex={setSide}
+            canPrint={Boolean(window.desktop?.print) && Boolean(output) && !building}
+            printerName={printPrefs.deviceName}
+            onPrintSheet={printCurrentSheet}
             pages={
               <div className="contact">
                 <div className="contact-bar">
@@ -565,6 +667,17 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {printOpen && (
+        <PrintPanel
+          twoUp={isTwoUp}
+          sheetCount={isTwoUp
+            ? (output?.sheets ?? sheets)
+            : (output?.pages ?? selection.keptCount)}
+          currentSheet={isTwoUp ? Math.floor(side / 2) + 1 : side + 1}
+          onClose={() => setPrintOpen(false)}
+          onPrint={sendJob} />
+      )}
     </div>
   );
 }
