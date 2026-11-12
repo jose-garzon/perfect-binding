@@ -691,3 +691,19 @@ input.control.invalid { border-color: var(--spot); background: var(--spot-wash);
 
 /* the caption's own print control, next to the sheet navigation */
 .caption .print-sheet { flex: none; }
+
+/* ── sources: the documents merged into one job ─────────────────────────── */
+.sources { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.source-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule, currentColor); }
+.source-row {
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid var(--rule, currentColor); padding: 4px 0;
+}
+.source-row[aria-current="true"] { box-shadow: inset 3px 0 0 var(--spot); }
+.source-pick {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  background: none; border: 0; padding: 4px 8px; text-align: left; cursor: pointer; color: inherit; font: inherit;
+}
+.source-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-meta { font-size: var(--t-1); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-actions { display: flex; gap: 2px; }

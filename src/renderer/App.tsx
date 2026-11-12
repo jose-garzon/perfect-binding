@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { buildBooklet, type BuildResult } from "../core/build";
+import { mergeSources } from "../core/merge";
 import { PAPER_SIZES, mm } from "../core/paper";
 import { sheetCount as sheetsFor, blankCount } from "../core/imposition";
 import { FULL_PAGE, type Bounds } from "../core/crop";
 import {
   clearThumbnails, closePdf, loadPdf, rasterizeForPrint, renderPage, renderThumbnail, scanBlanks, scanMargins,
+  type CropScan,
 } from "./lib/pdf";
 import { formatRanges, parseRanges, sheetsToPageRanges } from "./lib/ranges";
 import { DEFAULT_PRINT_PREFS, type PrintOptions, type PrintPrefs, type PrintResult } from "./lib/print";
-import { usePageSelection } from "./lib/selection";
+import { EMPTY_SNAPSHOT, keptPages, usePageSelection, type SelectionSnapshot } from "./lib/selection";
+import { SourcesPanel, type SourceRow } from "./components/SourcesPanel";
 import { Dropzone } from "./components/Dropzone";
 import { Preview, type PlateView } from "./components/Preview";
 import { CropPanel } from "./components/CropPanel";
@@ -112,17 +115,46 @@ const ASSEMBLY: Record<BindingChoice, string[]> = {
 /** Everything the UI needs to know about a build, minus the bytes themselves. */
 type OutputInfo = Omit<BuildResult, "bytes"> & { url: string };
 
+/** One opened PDF. Its bytes live in a ref map keyed by id, never in state. */
+interface Source {
+  id: string;
+  name: string;
+  doc: PDFDocumentProxy;
+  pageCount: number;
+  /** Margin measurement, null until the background scan reaches it. */
+  scan: CropScan | null;
+}
+
+/** The smallest margins of several crops: a box that cuts nothing from any of them. */
+function loosest(all: Bounds[]): Bounds {
+  return {
+    left: Math.min(...all.map((b) => b.left)),
+    top: Math.min(...all.map((b) => b.top)),
+    right: Math.min(...all.map((b) => b.right)),
+    bottom: Math.min(...all.map((b) => b.bottom)),
+  };
+}
+
 export default function App() {
-  const [file, setFile] = useState<{ name: string } | null>(null);
-  const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
+  // Several PDFs can be open at once; their kept pages are merged in list order.
+  const [sources, setSources] = useState<Source[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  /** Selections of the sources that are not active, undo history included. */
+  const [parked, setParked] = useState<ReadonlyMap<string, SelectionSnapshot>>(() => new Map());
   // PDF bytes live in refs, never in state or props: React's development build
   // serialises changed props onto its performance track, and a multi-megabyte
   // typed array there throws DataCloneError mid-commit.
-  const source = useRef<Uint8Array | null>(null);
+  const sourceBytes = useRef(new Map<string, Uint8Array>());
+  const merged = useRef<{ key: string; bytes: Uint8Array } | null>(null);
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
+  const nextId = useRef(0);
   const built = useRef<Uint8Array | null>(null);
-  const [pageCount, setPageCount] = useState(0);
+  const active = sources.find((s) => s.id === activeId) ?? null;
+  const doc = active?.doc ?? null;
+  const pageCount = active?.pageCount ?? 0;
+  const file = sources[0] ?? null;
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
-  const [detected, setDetected] = useState<{ perPage: Bounds[]; shared: Bounds } | null>(null);
   const [crop, setCrop] = useState<Bounds>(FULL_PAGE);
   const [scanning, setScanning] = useState(0); // 0-1 progress, 0 = idle
   const [output, setOutput] = useState<OutputInfo | null>(null);
@@ -142,6 +174,28 @@ export default function App() {
   const buildId = useRef(0);
   const selection = usePageSelection(pageCount);
 
+  /** What each source contributes to the job, in output order. */
+  const parts = useMemo(() => sources.map((s) => ({
+    source: s,
+    pages: s.id === activeId
+      ? selection.kept
+      : keptPages(s.pageCount, (parked.get(s.id) ?? EMPTY_SNAPSHOT).removed),
+  })), [sources, activeId, parked, selection.kept]);
+  const totalPages = sources.reduce((n, s) => n + s.pageCount, 0);
+  const totalKept = parts.reduce((n, p) => n + p.pages.length, 0);
+  const multi = sources.length > 1;
+
+  /** Margins of the job: per output page when merged, per source page otherwise. */
+  const detected = useMemo<CropScan | null>(() => {
+    if (sources.length === 0 || sources.some((s) => !s.scan)) return null;
+    if (sources.length === 1) return sources[0]!.scan;
+    return {
+      perPage: parts.flatMap(({ source, pages }) =>
+        pages.map((p) => source.scan!.perPage[p - 1] ?? FULL_PAGE)),
+      shared: loosest(sources.map((s) => s.scan!.shared)),
+    };
+  }, [sources, parts]);
+
   const set = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((s) => ({ ...s, [key]: value }));
   }, []);
@@ -158,35 +212,102 @@ export default function App() {
     selection.reset();
   }, [selection]);
 
-  /* ── loading a document ─────────────────────────────────────────────── */
-  const openFile = useCallback(async (f: File) => {
-    setError(null);
+  /* ── loading documents ──────────────────────────────────────────────── */
+  const discardAll = useCallback(() => {
+    for (const src of sourcesRef.current) closePdf(src.doc);
+    sourceBytes.current.clear();
+    merged.current = null;
+    built.current = null;
     setOutput((old) => { if (old) URL.revokeObjectURL(old.url); return null; });
-    setDetected(null);
-    setCrop(FULL_PAGE);
+    setParked(new Map());
     resetPages();
-    try {
-      const bytes = new Uint8Array(await f.arrayBuffer());
-      const d = await loadPdf(bytes);
-      source.current = bytes;
-      built.current = null;
-      setFile({ name: f.name });
-      setDoc((old) => { closePdf(old); return d; });
-      setPageCount(d.numPages);
-    } catch {
-      setError("That file could not be opened as a PDF.");
-    }
   }, [resetPages]);
 
+  /** Opens PDFs as sources: replacing the job, or appended to its end. */
+  const openFiles = useCallback(async (files: File[], mode: "replace" | "append") => {
+    const loaded: Source[] = [];
+    const bytesFor = new Map<string, Uint8Array>();
+    const failed: string[] = [];
+    for (const f of files) {
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const d = await loadPdf(bytes);
+        const id = `s${++nextId.current}`;
+        bytesFor.set(id, bytes);
+        loaded.push({ id, name: f.name, doc: d, pageCount: d.numPages, scan: null });
+      } catch {
+        failed.push(f.name);
+      }
+    }
+    setError(failed.length === 0 ? null
+      : files.length === 1 ? "That file could not be opened as a PDF."
+      : `Could not open as a PDF: ${failed.join(", ")}.`);
+    if (loaded.length === 0) return;
+    // Replacing discards the old bytes, so the new ones go in only after that.
+    if (mode === "replace" || sourcesRef.current.length === 0) discardAll();
+    for (const [id, bytes] of bytesFor) sourceBytes.current.set(id, bytes);
+    if (mode === "replace" || sourcesRef.current.length === 0) {
+      setCrop(FULL_PAGE);
+      setSources(loaded);
+      setActiveId(loaded[0]!.id);
+    } else {
+      setSources((list) => [...list, ...loaded]);
+    }
+  }, [discardAll]);
+
   const closeFile = useCallback(() => {
-    resetPages();
-    source.current = null;
-    built.current = null;
-    setFile(null);
-    setOutput((old) => { if (old) URL.revokeObjectURL(old.url); return null; });
-    setDoc((old) => { closePdf(old); return null; });
-    setPageCount(0);
-  }, [resetPages]);
+    discardAll();
+    setSources([]);
+    setActiveId(null);
+  }, [discardAll]);
+
+  /** Parks the active selection and brings back the chosen source's. */
+  const switchTo = useCallback((id: string, keepCurrent: boolean) => {
+    blankAbort.current?.abort();
+    blankAbort.current = null;
+    setBlankScan(0);
+    setRangeError(null);
+    setHideRemoved(false);
+    const current = activeId;
+    const snap = selection.snapshot();
+    selection.load(parked.get(id) ?? EMPTY_SNAPSHOT);
+    setParked((m) => {
+      const n = new Map(m);
+      if (current && keepCurrent) n.set(current, snap);
+      if (current && !keepCurrent) n.delete(current);
+      n.delete(id);
+      return n;
+    });
+    setActiveId(id);
+  }, [activeId, parked, selection]);
+
+  const activate = useCallback((id: string) => {
+    if (id !== activeId) switchTo(id, true);
+  }, [activeId, switchTo]);
+
+  const removeSource = useCallback((id: string) => {
+    const list = sourcesRef.current;
+    if (list.length <= 1) { closeFile(); return; }
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx < 0) return;
+    const rest = list.filter((s) => s.id !== id);
+    if (id === activeId) switchTo(rest[Math.min(idx, rest.length - 1)]!.id, false);
+    else setParked((m) => { const n = new Map(m); n.delete(id); return n; });
+    closePdf(list[idx]!.doc);
+    sourceBytes.current.delete(id);
+    setSources(rest);
+  }, [activeId, closeFile, switchTo]);
+
+  const moveSource = useCallback((id: string, delta: -1 | 1) => {
+    setSources((list) => {
+      const i = list.findIndex((s) => s.id === id);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= list.length) return list;
+      const next = [...list];
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
+  }, []);
 
   /** Draws a source page for the crop preview without exposing pdf.js as a prop. */
   const renderSample = useCallback(async (canvas: HTMLCanvasElement, pageNumber: number) => {
@@ -250,21 +371,34 @@ export default function App() {
     setBlankScan(0);
   }, []);
 
-  /* ── margin detection, once per document ───────────────────────────── */
+  /* ── margin detection, once per source, one source at a time ──────── */
+  const pendingScan = sources.find((s) => !s.scan)?.id ?? null;
   useEffect(() => {
-    if (!doc) return;
+    const src = sourcesRef.current.find((s) => s.id === pendingScan);
+    if (!src) return;
     const ac = new AbortController();
+    const settle = (scan: CropScan) => setSources((list) =>
+      list.map((s) => (s.id === src.id ? { ...s, scan } : s)));
     setScanning(0.001);
-    scanMargins(doc, (done, total) => setScanning(done / total), ac.signal)
-      .then((scan) => {
-        if (ac.signal.aborted) return;
-        setDetected(scan);
-        setCrop(scan.shared);
+    scanMargins(src.doc, (done, total) => setScanning(done / total), ac.signal)
+      .then((scan) => { if (!ac.signal.aborted) settle(scan); })
+      // A page that will not render must not stall the queue: no trim for it.
+      .catch(() => {
+        if (!ac.signal.aborted) {
+          settle({ perPage: Array(src.pageCount).fill(FULL_PAGE), shared: FULL_PAGE });
+        }
       })
-      .catch(() => {})
       .finally(() => !ac.signal.aborted && setScanning(0));
     return () => ac.abort();
-  }, [doc]);
+  }, [pendingScan]);
+
+  // The uniform crop starts from what was measured, and again when the set of
+  // documents changes what that is.
+  const sharedKey = detected ? JSON.stringify(detected.shared) : "";
+  useEffect(() => {
+    if (detected) setCrop(detected.shared);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedKey]);
 
   /* ── rebuild the booklet whenever anything changes ─────────────────── */
   const activeCrop = useMemo<Bounds | Bounds[] | null>(() => {
@@ -274,16 +408,34 @@ export default function App() {
   }, [settings.cropEnabled, settings.uniformCrop, crop, detected]);
 
   useEffect(() => {
-    const bytes = source.current;
-    if (!file || !bytes) return;
+    if (parts.length === 0) return;
     const id = ++buildId.current;
     const timer = setTimeout(async () => {
       setBuilding(true);
       try {
-        const { bytes: outBytes, ...info } = await buildBooklet(bytes, {
+        // One source goes in as it is; several are merged first, and the
+        // merged document's every page takes part.
+        let input: Uint8Array;
+        let pages: number[] | null;
+        if (parts.length === 1) {
+          input = sourceBytes.current.get(parts[0]!.source.id)!;
+          pages = parts[0]!.pages;
+        } else {
+          const key = parts.map((p) => `${p.source.id}:${formatRanges(p.pages)}`).join("|");
+          if (merged.current?.key !== key) {
+            const bytes = await mergeSources(parts.map((p) => ({
+              bytes: sourceBytes.current.get(p.source.id)!, pages: p.pages,
+            })));
+            merged.current = { key, bytes };
+          }
+          if (id !== buildId.current) return;
+          input = merged.current.bytes;
+          pages = null;
+        }
+        const { bytes: outBytes, ...info } = await buildBooklet(input, {
           ...coreBinding(settings.binding, settings.sheetsPerSignature),
           paperId: settings.paperId,
-          pages: selection.kept,
+          pages,
           crop: activeCrop,
           outerMargin: mm(settings.outerMargin),
           gutter: mm(settings.gutter),
@@ -308,7 +460,7 @@ export default function App() {
       }
     }, 220);
     return () => clearTimeout(timer);
-  }, [file, settings, activeCrop, selection.kept]);
+  }, [parts, settings, activeCrop]);
 
   /* ── export ─────────────────────────────────────────────────────────── */
   const exportPdf = useCallback(async () => {
@@ -319,10 +471,11 @@ export default function App() {
       : settings.binding === "draft"
         ? "draft-print"
         : `${settings.binding}-booklet`;
-    const selected = selection.removedCount
-      ? ` (${selection.keptCount} of ${pageCount} pages)`
-      : "";
-    const name = `${file.name.replace(/\.pdf$/i, "")} — ${suffix}${selected}.pdf`;
+    const base = file.name.replace(/\.pdf$/i, "");
+    const name = multi
+      ? `${base} + ${sources.length - 1} more — merged ${suffix} (${totalKept} pages).pdf`
+      : `${base} — ${suffix}${selection.removedCount
+        ? ` (${selection.keptCount} of ${pageCount} pages)` : ""}.pdf`;
     const bridge = window.desktop;
     if (bridge) {
       const ok = await bridge.savePdf(name, bytes);
@@ -335,7 +488,8 @@ export default function App() {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2200);
-  }, [output, file, settings.binding, selection.keptCount, selection.removedCount, pageCount]);
+  }, [output, file, multi, sources.length, totalKept, settings.binding,
+    selection.keptCount, selection.removedCount, pageCount]);
 
 
   /* ── printing ───────────────────────────────────────────────────────────
@@ -435,7 +589,14 @@ export default function App() {
   /* The File → Print… menu item arrives here. */
   useEffect(() => window.desktop?.print?.onOpen(() => { if (file) openPrint(); }), [file, openPrint]);
 
-  const sheets = selection.keptCount ? sheetsFor(selection.keptCount) : 0;
+  const sheets = totalKept ? sheetsFor(totalKept) : 0;
+  const sourceRows = useMemo<SourceRow[]>(() => parts.map(({ source, pages }) => ({
+    id: source.id, name: source.name, pageCount: source.pageCount,
+    keptCount: pages.length, ranges: formatRanges(pages),
+  })), [parts]);
+  const jobPages = totalKept === totalPages
+    ? `${totalPages} pages`
+    : `${totalKept} of ${totalPages} pages · ${totalPages - totalKept} removed`;
   const keptRanges = useMemo(
     () => formatRanges(selection.kept),
     [selection.kept],
@@ -444,20 +605,16 @@ export default function App() {
   // that — not whether the job is a book — is what these controls depend on.
   const isTwoUp = settings.binding !== "none";
 
-  if (!file) return <Landing onFile={openFile} error={error} update={update} />;
+  if (!file) return <Landing onFiles={(fs) => openFiles(fs, "replace")} error={error} update={update} />;
 
   return (
     <div className="app">
       <header className="masthead">
         <Wordmark />
         <span className="folio-line">
-          <strong>{file.name}</strong>
+          <strong>{multi ? `${file.name} + ${sources.length - 1} more` : file.name}</strong>
           <span className="rule-v" />
-          <span>
-            {selection.removedCount
-              ? `${selection.keptCount} of ${pageCount} pages · ${selection.removedCount} removed`
-              : `${pageCount} pages`}
-          </span>
+          <span>{jobPages}</span>
           <button className="btn ghost sm" title="Close this file" onClick={closeFile}>
             Close
           </button>
@@ -472,8 +629,12 @@ export default function App() {
             e.currentTarget.querySelector("input")?.click();
           }}>
           Replace
-          <input type="file" accept="application/pdf,.pdf" hidden
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) openFile(f); e.target.value = ""; }} />
+          <input type="file" accept="application/pdf,.pdf" multiple hidden
+            onChange={(e) => {
+              const fs = [...(e.target.files ?? [])];
+              if (fs.length) openFiles(fs, "replace");
+              e.target.value = "";
+            }} />
         </label>
         <button className="btn" onClick={openPrint} disabled={!output || building}
           title="Print the booklet (Ctrl+P)">
@@ -507,6 +668,10 @@ export default function App() {
 
           <section className="section">
             <h2><span className="step">02</span>Pages</h2>
+            <SourcesPanel rows={sourceRows} activeId={activeId} onActivate={activate}
+              onMove={moveSource} onRemove={removeSource}
+              onAdd={(fs) => { if (fs.length) openFiles(fs, "append"); }} />
+            {multi && active && <p className="folio-line">Choosing pages from {active.name}</p>}
             <PagesPanel
               pageCount={pageCount}
               keptCount={selection.keptCount}
@@ -632,6 +797,7 @@ export default function App() {
               <div className="contact">
                 <div className="contact-bar">
                   <span className="folio-line">
+                    {multi && active ? `${active.name} · ` : ""}
                     {selection.removedCount
                       ? `${selection.keptCount} of ${pageCount} pages kept`
                       : `${pageCount} pages`}
@@ -654,18 +820,17 @@ export default function App() {
               </div>
             } />
           <div className="colophon">
-            <Stat k="Source" v={selection.removedCount
-              ? `${selection.keptCount} of ${pageCount} pages`
-              : `${pageCount} pages`} />
+            <Stat k={multi ? `Sources · ${sources.length} files` : "Source"}
+              v={totalKept === totalPages ? `${totalPages} pages` : `${totalKept} of ${totalPages} pages`} />
             {isTwoUp ? (
               <>
                 <Stat k="Sheets of paper" v={`${output?.sheets ?? sheets}`} />
                 <Stat k="Printed sides" v={`${output?.pages ?? sheets * 2}`} />
-                <Stat k="Blank slots" v={`${output?.blanks ?? blankCount(selection.keptCount)}`} />
+                <Stat k="Blank slots" v={`${output?.blanks ?? blankCount(totalKept)}`} />
                 <Stat k="Duplex" v={settings.duplexFlip === "short" ? "Flip short edge" : "Flip long edge"} />
               </>
             ) : (
-              <Stat k="Output pages" v={`${output?.pages ?? selection.keptCount}`} />
+              <Stat k="Output pages" v={`${output?.pages ?? totalKept}`} />
             )}
             {settings.cropEnabled && (
               <Stat k="Trimmed" v={settings.uniformCrop
@@ -681,7 +846,7 @@ export default function App() {
           twoUp={isTwoUp}
           sheetCount={isTwoUp
             ? (output?.sheets ?? sheets)
-            : (output?.pages ?? selection.keptCount)}
+            : (output?.pages ?? totalKept)}
           currentSheet={isTwoUp ? Math.floor(side / 2) + 1 : side + 1}
           onClose={() => setPrintOpen(false)}
           onPrint={sendJob} />
@@ -699,8 +864,8 @@ function Stat({ k, v }: { k: string; v: string }) {
  * plate on the right, and the four methods below as a directory of hairline
  * cells — the reference magazine's directory spread.
  */
-function Landing({ onFile, error, update }: {
-  onFile: (f: File) => void;
+function Landing({ onFiles, error, update }: {
+  onFiles: (files: File[]) => void;
   error: string | null;
   update: ReturnType<typeof useUpdate>;
 }) {
@@ -726,7 +891,7 @@ function Landing({ onFile, error, update }: {
               </p>
             </div>
             <div>
-              <Dropzone onFile={onFile} />
+              <Dropzone onFiles={onFiles} />
               {error && <div className="error">{error}</div>}
             </div>
           </div>

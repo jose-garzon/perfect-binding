@@ -30,6 +30,25 @@ export interface PageSelection {
   undo: () => void;
   /** Forgets the selection and its history — a new document was loaded. */
   reset: () => void;
+  /** The selection and its undo history, to park while another source is active. */
+  snapshot: () => SelectionSnapshot;
+  /** Brings back a parked selection, history included. */
+  load: (snap: SelectionSnapshot) => void;
+}
+
+/** One source's selection while it is not the active one. */
+export interface SelectionSnapshot {
+  removed: ReadonlySet<number>;
+  history: ReadonlySet<number>[];
+}
+
+export const EMPTY_SNAPSHOT: SelectionSnapshot = { removed: new Set(), history: [] };
+
+/** Kept pages, 1-based ascending, for a source with the given removals. */
+export function keptPages(pageCount: number, removed: ReadonlySet<number>): number[] {
+  const kept: number[] = [];
+  for (let p = 1; p <= pageCount; p++) if (!removed.has(p)) kept.push(p);
+  return kept;
 }
 
 export function usePageSelection(pageCount: number): PageSelection {
@@ -38,10 +57,7 @@ export function usePageSelection(pageCount: number): PageSelection {
   const [canUndo, setCanUndo] = useState(false);
   const history = useRef<ReadonlySet<number>[]>([]);
 
-  const kept = useMemo(
-    () => Array.from({ length: pageCount }, (_, i) => i + 1).filter((p) => !removed.has(p)),
-    [pageCount, removed],
-  );
+  const kept = useMemo(() => keptPages(pageCount, removed), [pageCount, removed]);
 
   /** Applies a new removed-set, refusing one that would leave nothing to print. */
   const apply = useCallback((next: Set<number>, note?: string) => {
@@ -137,6 +153,18 @@ export function usePageSelection(pageCount: number): PageSelection {
     setRemovedState(new Set());
   }, []);
 
+  const snapshot = useCallback(
+    (): SelectionSnapshot => ({ removed, history: [...history.current] }),
+    [removed],
+  );
+
+  const load = useCallback((snap: SelectionSnapshot) => {
+    history.current = [...snap.history];
+    setCanUndo(snap.history.length > 0);
+    setNotice(null);
+    setRemovedState(snap.removed);
+  }, []);
+
   // Cmd/Ctrl+Z anywhere but a text field, so a removal is always one keystroke
   // from being taken back.
   useEffect(() => {
@@ -169,9 +197,11 @@ export function usePageSelection(pageCount: number): PageSelection {
     restoreAll,
     undo,
     reset,
+    snapshot,
+    load,
   }), [
     removed, kept, notice, canUndo,
-    toggle, remove, restore, keepOnly, invert, restoreAll, undo, reset,
+    toggle, remove, restore, keepOnly, invert, restoreAll, undo, reset, snapshot, load,
   ]);
 }
 

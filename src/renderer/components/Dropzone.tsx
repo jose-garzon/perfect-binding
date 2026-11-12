@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 
-export function Dropzone({ onFile }: { onFile: (file: File) => void }) {
+export function Dropzone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
   const pick = (list: FileList | null) => {
-    const file = [...(list ?? [])].find((f) => f.type === "application/pdf" ||
+    const files = [...(list ?? [])].filter((f) => f.type === "application/pdf" ||
       f.name.toLowerCase().endsWith(".pdf"));
-    if (file) onFile(file);
+    if (files.length) onFiles(files);
   };
 
   return (
@@ -25,9 +25,9 @@ export function Dropzone({ onFile }: { onFile: (file: File) => void }) {
         <path d="M12 15V4m0 0L8 8M12 4l4 4" />
         <path d="M4 14v5h16v-5" />
       </svg>
-      <span className="big">Drop a PDF</span>
-      <span className="small">or click to choose a file — nothing leaves your computer</span>
-      <input ref={input} type="file" accept="application/pdf,.pdf" hidden
+      <span className="big">Drop PDFs</span>
+      <span className="small">or click to choose — several are merged into one job; nothing leaves your computer</span>
+      <input ref={input} type="file" accept="application/pdf,.pdf" multiple hidden
         onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
     </div>
   );
