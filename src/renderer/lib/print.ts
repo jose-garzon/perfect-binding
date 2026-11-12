@@ -5,6 +5,8 @@
  * nothing saved yet.
  */
 
+import type { PrintPage } from "./pdf";
+
 export type Duplex = "simplex" | "shortEdge" | "longEdge";
 
 export interface Printer {
@@ -51,7 +53,7 @@ export interface PrintOptions extends PrintPrefs {
 
 export interface PrintBridge {
   printers: () => Promise<Printer[]>;
-  job: (bytes: Uint8Array, options: PrintOptions) => Promise<PrintResult>;
+  job: (pages: PrintPage[], options: PrintOptions) => Promise<PrintResult>;
   prefs: (patch?: Partial<PrintPrefs>) => Promise<PrintPrefs>;
   onOpen: (handler: () => void) => () => void;
 }

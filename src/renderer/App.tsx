@@ -5,7 +5,7 @@ import { PAPER_SIZES, mm } from "../core/paper";
 import { sheetCount as sheetsFor, blankCount } from "../core/imposition";
 import { FULL_PAGE, type Bounds } from "../core/crop";
 import {
-  clearThumbnails, closePdf, loadPdf, renderPage, renderThumbnail, scanBlanks, scanMargins,
+  clearThumbnails, closePdf, loadPdf, rasterizeForPrint, renderPage, renderThumbnail, scanBlanks, scanMargins,
 } from "./lib/pdf";
 import { formatRanges, parseRanges, sheetsToPageRanges } from "./lib/ranges";
 import { DEFAULT_PRINT_PREFS, type PrintOptions, type PrintPrefs, type PrintResult } from "./lib/print";
@@ -357,7 +357,15 @@ export default function App() {
     const bridge = window.desktop?.print;
     if (!bytes) return { ok: false, reason: "There is nothing built to print yet." };
     if (!bridge) return { ok: false, reason: "Printing needs the desktop app." };
-    const result = await bridge.job(bytes, options);
+    let pages;
+    try {
+      pages = await rasterizeForPrint(bytes, options.pageRanges);
+    } catch (e) {
+      return { ok: false, reason: `The booklet could not be prepared for printing. ${(e as Error).message}` };
+    }
+    if (pages.length === 0) return { ok: false, reason: "The chosen pages are not in the booklet." };
+    const { pageRanges: _, ...rest } = options;
+    const result = await bridge.job(pages, rest);
     if (result.ok) {
       setPrinted(true);
       setTimeout(() => setPrinted(false), 2200);

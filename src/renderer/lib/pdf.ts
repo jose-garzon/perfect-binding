@@ -234,3 +234,58 @@ export async function scanBlanks(
   }
   return blank;
 }
+
+/* ── printing ─────────────────────────────────────────────────────────────── */
+
+/** One output page, rasterized for the printer, with its size in points. */
+export interface PrintPage {
+  png: Uint8Array;
+  width: number;
+  height: number;
+}
+
+/**
+ * Rasterizes the chosen output pages for printing. Electron cannot print a PDF
+ * shown in Chromium's viewer — the plugin's content never reaches the job and
+ * the sheet comes out blank — so the printer is handed plain images instead.
+ * `ranges` are 0-based and inclusive; empty prints every page.
+ */
+export async function rasterizeForPrint(
+  bytes: Uint8Array,
+  ranges: Array<{ from: number; to: number }> = [],
+  dpi = 240,
+): Promise<PrintPage[]> {
+  const doc = await loadPdf(bytes);
+  try {
+    const wanted: number[] = [];
+    if (ranges.length === 0) {
+      for (let i = 0; i < doc.numPages; i++) wanted.push(i);
+    } else {
+      for (const r of ranges) {
+        for (let i = Math.max(0, r.from); i <= Math.min(doc.numPages - 1, r.to); i++) wanted.push(i);
+      }
+    }
+
+    const canvas = document.createElement("canvas");
+    const pages: PrintPage[] = [];
+    for (const index of wanted) {
+      const page = await doc.getPage(index + 1);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: dpi / 72 });
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext("2d", { alpha: false })!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvas, canvasContext: ctx, viewport } as never).promise;
+      const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/png"));
+      if (!blob) throw new Error(`Page ${index + 1} could not be rendered for printing.`);
+      pages.push({ png: new Uint8Array(await blob.arrayBuffer()), width: base.width, height: base.height });
+      page.cleanup();
+    }
+    canvas.width = canvas.height = 0;
+    return pages;
+  } finally {
+    closePdf(doc);
+  }
+}

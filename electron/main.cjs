@@ -61,7 +61,7 @@ ipcMain.handle("save-pdf", async (event, suggestedName, bytes) => {
    no export, no save dialog, nothing left on disk. See electron/print.cjs. */
 ipcMain.handle("print:printers", () => printing.listPrinters());
 
-ipcMain.handle("print:job", (_e, bytes, options) => printing.printBytes(bytes, options));
+ipcMain.handle("print:job", (_e, pages, options) => printing.printPages(pages, options));
 
 /** Called with no argument this reads the preferences; with one, it merges it in. */
 ipcMain.handle("print:prefs", async (_e, patch) => {
