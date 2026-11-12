@@ -18,6 +18,14 @@ const PAPERS = [
   { value: "Tabloid", label: "Tabloid" },
 ];
 
+export type Flip = "short" | "long";
+
+/** Which edge a printer turns the paper over on, as the driver names it. */
+const duplexFor = (flip: Flip): Duplex => (flip === "short" ? "shortEdge" : "longEdge");
+
+/** A printer and flip that have been checked with a test sheet. */
+export const testKey = (device: string, flip: Flip) => `${device}|${flip}`;
+
 /**
  * The print setup sheet.
  *
@@ -26,9 +34,14 @@ const PAPERS = [
  * remembered. Everything this panel asks for is ours, and so it can be saved
  * and replayed — which is what makes the one-click reprint possible. The
  * platform dialog stays available for the driver settings this does not carry.
+ *
+ * For a two-up job the flip is not a printer setting of its own: it is the
+ * imposition's duplex flip, held by the app, and the printer is asked to turn
+ * the paper on that same edge. One choice, so the two can never disagree.
  */
 export function PrintPanel({
-  twoUp, sheetCount, currentSheet, onClose, onPrint,
+  twoUp, sheetCount, currentSheet, flip, onFlip, building, tested, onTested,
+  initialFailure, onClose, onPrint,
 }: {
   /** Two source pages to a printed side — everything but margins-only. */
   twoUp: boolean;
@@ -36,6 +49,16 @@ export function PrintPanel({
   sheetCount: number;
   /** The sheet on show in the proof view, 1-based. */
   currentSheet: number;
+  /** The imposition's duplex flip; the printer is asked for the same edge. */
+  flip: Flip;
+  onFlip: (flip: Flip) => void;
+  /** True while a changed flip is being rebuilt: nothing prints the old one. */
+  building: boolean;
+  /** Printer-and-flip pairs a test sheet has confirmed, see `testKey`. */
+  tested: ReadonlySet<string>;
+  onTested: (key: string) => void;
+  /** Why the last one-click print failed, if that is what opened the panel. */
+  initialFailure?: string | null;
   onClose: () => void;
   onPrint: (options: PrintOptions) => Promise<PrintResult>;
 }) {
@@ -44,8 +67,12 @@ export function PrintPanel({
   const [missing, setMissing] = useState<string | null>(null);
   const [scope, setScope] = useState<PrintScope>("all");
   const [rangeText, setRangeText] = useState("");
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(initialFailure ?? null);
   const [busy, setBusy] = useState(false);
+  /** The test sheet's progress: not sent, out and waiting for an answer, or re-flipped. */
+  const [check, setCheck] = useState<"idle" | "asking" | "flipped">("idle");
+  /** Paper, scale and colour are rarely changed; they wait behind a disclosure. */
+  const [more, setMore] = useState(false);
 
   const dialog = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
@@ -70,12 +97,12 @@ export function PrintPanel({
         // Left unset when the saved printer is gone, and when none was ever
         // saved: a job is never sent to a printer the user did not pick.
         deviceName: gone ? null : saved.deviceName,
-        // Nothing saved yet: a two-up job wants both sides of the paper, a
-        // margins-only one does not.
-        duplex: saved.deviceName ? saved.duplex : (twoUp ? "shortEdge" : "simplex"),
+        duplex: twoUp ? duplexFor(flip) : (saved.deviceName ? saved.duplex : "simplex"),
       });
     })().catch(() => setPrinters([]));
     return () => { stale = true; };
+    // The flip is read once here and applied on every send below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [twoUp]);
 
   /* ── the panel is modal: escape closes it, focus comes back afterwards ── */
@@ -84,6 +111,15 @@ export function PrintPanel({
     dialog.current?.querySelector<HTMLElement>("select, input, button")?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
+      // Keep Tab inside the sheet while it is open.
+      if (e.key === "Tab" && dialog.current) {
+        const all = [...dialog.current.querySelectorAll<HTMLElement>(
+          "button:not(:disabled), select, input:not(:disabled)")];
+        if (all.length === 0) return;
+        const first = all[0]!, last = all[all.length - 1]!;
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
     };
     window.addEventListener("keydown", onKey, true);
     return () => {
@@ -109,9 +145,23 @@ export function PrintPanel({
     return parsed && parsed.ok ? sheetsToPageRanges(parsed.pages, twoUp) : [];
   }
 
+  const chosen = scope === "all" ? sheetCount
+    : scope === "sheet" ? 1
+    : parsed && parsed.ok ? parsed.pages.length : 0;
+  const paper = chosen * prefs.copies;
+
+  const key = prefs.deviceName ? testKey(prefs.deviceName, flip) : null;
+  // A test is worth it only when there is a back to get wrong and more than
+  // one sheet to waste.
+  const needsTest = twoUp && sheetCount > 1 && key !== null && !tested.has(key);
+
   const noPrinters = printers !== null && printers.length === 0;
-  const canPrint = !busy && Boolean(prefs.deviceName)
+  const canPrint = !busy && !building && Boolean(prefs.deviceName)
     && (scope !== "range" || Boolean(parsed && parsed.ok));
+
+  const options = (ranges: PrintOptions["pageRanges"], silent: boolean, copies = prefs.copies) => ({
+    ...prefs, copies, duplex: twoUp ? duplexFor(flip) : prefs.duplex, pageRanges: ranges, silent,
+  });
 
   async function send(silent: boolean) {
     if (scope === "range" && !(parsed && parsed.ok)) {
@@ -120,18 +170,39 @@ export function PrintPanel({
     }
     setBusy(true);
     setFailure(null);
-    const result = await onPrint({ ...prefs, pageRanges: pageRanges(), silent });
+    const result = await onPrint(options(pageRanges(), silent));
     setBusy(false);
     if (result.ok) {
       // Only our own panel's choices are worth saving — the platform dialog
       // never says what was picked in it.
-      if (silent) await window.desktop?.print?.prefs(prefs);
+      if (silent) await window.desktop?.print?.prefs(options(undefined, true));
       onClose();
       return;
     }
     if (result.cancelled) return; // the user meant that
     setFailure(result.reason ?? "The job could not be sent to the printer.");
   }
+
+  async function sendTest() {
+    setBusy(true);
+    setFailure(null);
+    const result = await onPrint(options(sheetsToPageRanges([1], true), true, 1));
+    setBusy(false);
+    if (result.ok) {
+      await window.desktop?.print?.prefs(options(undefined, true));
+      setCheck("asking");
+      return;
+    }
+    if (!result.cancelled) setFailure(result.reason ?? "The test sheet could not be sent.");
+  }
+
+  function answer(upright: boolean) {
+    if (upright) { if (key) onTested(key); setCheck("idle"); return; }
+    onFlip(flip === "short" ? "long" : "short");
+    setCheck("flipped");
+  }
+
+  const other = flip === "short" ? "long" : "short";
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -156,7 +227,7 @@ export function PrintPanel({
                 ? `The printer saved last time — ${missing} — is not available.`
                 : undefined}>
               <Select value={prefs.deviceName ?? ""}
-                onChange={(v) => { set("deviceName", v || null); setMissing(null); }}
+                onChange={(v) => { set("deviceName", v || null); setMissing(null); setCheck("idle"); }}
                 options={[
                   ...(prefs.deviceName ? [] : [{ value: "", label: "Choose a printer…" }]),
                   ...printers.map((p) => ({
@@ -167,10 +238,81 @@ export function PrintPanel({
             </Field>
           )}
 
+          {twoUp ? (
+            <Field label="Paper turns over on"
+              hint="Both sides of every sheet are printed. The back is laid out for this edge.">
+              <Segmented label="Paper turns over on" value={flip}
+                onChange={(v) => { onFlip(v); setCheck("idle"); }}
+                options={[
+                  { value: "short", label: "Short edge" },
+                  { value: "long", label: "Long edge" },
+                ]} />
+            </Field>
+          ) : (
+            <Field label="Sides">
+              <Segmented label="Sides" value={prefs.duplex} onChange={(v: Duplex) => set("duplex", v)}
+                options={[
+                  { value: "simplex", label: "One side" },
+                  { value: "shortEdge", label: "Short edge" },
+                  { value: "longEdge", label: "Long edge" },
+                ]} />
+            </Field>
+          )}
+
+          {/* The one moment paper can be wasted in bulk, so it is checked on one sheet. */}
+          {twoUp && sheetCount > 1 && prefs.deviceName && (needsTest || check !== "idle") && (
+            <div className="test-sheet" role="group" aria-labelledby="test-sheet-title">
+              <p className="sr-only" aria-live="polite">
+                {check === "asking" ? "Test sheet sent. Is the back the right way up?"
+                  : check === "flipped" ? `Switched to the ${flip} edge.` : ""}
+              </p>
+              {check === "asking" ? (
+                <>
+                  <p><strong id="test-sheet-title">Sheet 1 is on its way.</strong> Turn it over the way you
+                    would read it. Is the back the right way up?</p>
+                  <div className="test-actions">
+                    <button type="button" className="btn sm primary" onClick={() => answer(true)}>
+                      Yes, upright
+                    </button>
+                    <button type="button" className="btn sm ghost" onClick={() => answer(false)}>
+                      No, upside down
+                    </button>
+                  </div>
+                </>
+              ) : check === "flipped" ? (
+                <>
+                  <p><strong id="test-sheet-title">Switched to the {flip} edge.</strong> Print sheet 1 again to
+                    confirm before the rest.</p>
+                  <div className="test-actions">
+                    <button type="button" className="btn sm primary" onClick={sendTest}
+                      disabled={busy || building}>
+                      Print test sheet again
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p><strong id="test-sheet-title">Print one test sheet first.</strong> Printers disagree on which
+                    edge they turn the paper over; one sheet tells you before {sheetCount} do.</p>
+                  <div className="test-actions">
+                    <button type="button" className="btn sm primary" onClick={sendTest}
+                      disabled={busy || building}>
+                      Print test sheet
+                    </button>
+                    <button type="button" className="btn sm ghost"
+                      onClick={() => key && onTested(key)}>
+                      Already checked
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           <Field label="Print" hint={twoUp
             ? "A sheet is two printed sides, so one sheet is two pages of the built file."
             : undefined}>
-            <Segmented value={scope} onChange={setScope}
+            <Segmented label="What to print" value={scope} onChange={setScope}
               options={[
                 { value: "all", label: "Everything" },
                 { value: "range", label: twoUp ? "Sheets" : "Pages" },
@@ -183,7 +325,7 @@ export function PrintPanel({
               value={`1–${sheetCount}`}
               hint="Ranges like 1-4, 9, 12- .">
               <input className={`control${rangeError ? " invalid" : ""}`} type="text"
-                inputMode="numeric" spellCheck={false} value={rangeText} autoFocus
+                name="print-range" inputMode="numeric" spellCheck={false} value={rangeText} autoFocus
                 aria-label={twoUp ? "Sheets to print" : "Pages to print"}
                 aria-invalid={rangeError ? true : undefined}
                 onChange={(e) => { setRangeText(e.target.value); setFailure(null); }} />
@@ -200,22 +342,27 @@ export function PrintPanel({
 
           {rangeError && <p className="notice bad" role="alert">{rangeError}</p>}
 
-          <Field label="Copies" value={`${prefs.copies}`}>
-            <Slider min={1} max={20} value={prefs.copies} onChange={(v) => set("copies", v)} />
+          <Field label="Copies">
+            <input className="control copies" type="number" name="copies" id="print-copies"
+              min={1} max={999} inputMode="numeric" value={prefs.copies}
+              aria-label="Copies"
+              onChange={(e) => {
+                const n = Math.round(Number(e.target.value));
+                set("copies", Number.isFinite(n) ? Math.min(999, Math.max(1, n)) : 1);
+              }} />
           </Field>
 
-          <Field label="Sides"
-            hint={twoUp
-              ? "A booklet needs both sides of the paper. This asks the printer for it; the imposition's own duplex flip is a separate setting."
-              : undefined}>
-            <Segmented value={prefs.duplex} onChange={(v: Duplex) => set("duplex", v)}
-              options={[
-                { value: "simplex", label: "One side" },
-                { value: "shortEdge", label: "Short edge" },
-                { value: "longEdge", label: "Long edge" },
-              ]} />
-          </Field>
+          <button type="button" className="disclosure" aria-expanded={more}
+            aria-controls="print-more" onClick={() => setMore((m) => !m)}>
+            More options
+            <span className="disclosure-summary">
+              {[prefs.paperName ?? "Paper as loaded",
+                prefs.scale === 100 ? null : `${prefs.scale}%`,
+                prefs.color ? null : "Greyscale"].filter(Boolean).join(" · ")}
+            </span>
+          </button>
 
+          <div id="print-more" hidden={!more}>
           <Field label="Paper">
             <Select value={prefs.paperName ?? ""} onChange={(v) => set("paperName", v || null)}
               options={PAPERS} />
@@ -233,26 +380,32 @@ export function PrintPanel({
             <Switch label="Colour" sub={prefs.color ? "As built" : "Greyscale"}
               checked={prefs.color} onChange={(v) => set("color", v)} />
           </Field>
+          </div>
 
           {failure && <p className="notice bad" role="alert">{failure}</p>}
         </div>
 
         <footer className="modal-foot">
           <p className="hint">
-            Nothing chosen in the system dialog can be saved — the platform does not
-            report it back.
+            {needsTest
+              ? `Not tested on this printer yet. If the back comes out upside down, switch to the ${other} edge.`
+              : "Choices made in the system dialog apply to this print only; they can't be remembered."}
           </p>
           <div className="foot-actions">
             <button type="button" className="btn ghost sm" onClick={() => send(false)}
-              disabled={busy}
+              disabled={busy || building}
               title="Hand the job to the platform's own dialog">
               System dialog…
             </button>
             <div className="spacer" />
-            {busy && <span className="busy"><i className="spinner" />Sending…</span>}
-            <button type="button" className="btn primary" onClick={() => send(true)}
-              disabled={!canPrint}>
-              Print
+            {(busy || building) && (
+              <span className="busy"><i className="spinner" />{building ? "Rebuilding…" : "Sending…"}</span>
+            )}
+            <button type="button" className={needsTest ? "btn sm ghost" : "btn primary"}
+              onClick={() => send(true)} disabled={!canPrint || paper === 0}>
+              {paper === 0
+                ? "Print"
+                : `${needsTest ? "Skip test, print" : "Print"} ${paper} ${unit}${paper === 1 ? "" : "s"}`}
             </button>
           </div>
         </footer>

@@ -1,15 +1,15 @@
 Perfect Binding bundles two typefaces, both under the SIL Open Font
 License, Version 1.1. The full licence text of each follows.
 
-The files here are the Latin subsets of the variable fonts, taken from
-Google Fonts. They are bundled rather than fetched because the Electron
+The files here are the Latin subsets of the variable fonts, taken from the
+Fontsource packages (Google Fonts builds). They are bundled rather than fetched because the Electron
 Content-Security-Policy (default-src 'self') forbids external requests.
 
 ================================================================================
-Archivo — archivo-latin.woff2
+Schibsted Grotesk — schibsted-grotesk-latin.woff2
 ================================================================================
 
-Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+Copyright 2021 The Schibsted Grotesk Project Authors (https://github.com/schibsted/schibsted-grotesk)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
@@ -104,10 +104,10 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ================================================================================
-Newsreader — newsreader-latin.woff2, newsreader-latin-italic.woff2
+Martian Mono — martian-mono-latin.woff2
 ================================================================================
 
-Copyright 2020 The Newsreader Project Authors (http://github.com/productiontype/Newsreader)
+Copyright 2021 The Martian Mono Project Authors (https://github.com/evilmartians/mono)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

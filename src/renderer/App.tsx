@@ -18,7 +18,8 @@ import { Preview, type PlateView } from "./components/Preview";
 import { CropPanel } from "./components/CropPanel";
 import { PageGrid } from "./components/PageGrid";
 import { PagesPanel } from "./components/PagesPanel";
-import { PrintPanel } from "./components/PrintPanel";
+import { PrintPanel, testKey } from "./components/PrintPanel";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Field, Segmented, Select, Slider, Switch } from "./components/Controls";
 import {
   DraftDiagram, MarginsDiagram, PerfectDiagram, SaddleDiagram,
@@ -55,6 +56,36 @@ const DEFAULTS: Settings = {
   uniformCrop: true,
 };
 
+/* Settings describe the reader's printer and taste, not one file, so they
+   outlive a launch. Storage can be missing or blocked; defaults then apply. */
+const SETTINGS_KEY = "pb.settings.v1";
+const TESTED_KEY = "pb.tested.v1";
+
+function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULTS;
+    const saved = JSON.parse(raw) as Partial<Settings>;
+    const out = { ...DEFAULTS };
+    for (const k of Object.keys(DEFAULTS) as Array<keyof Settings>) {
+      if (typeof saved[k] === typeof DEFAULTS[k]) (out as Record<string, unknown>)[k] = saved[k];
+    }
+    if (!BINDINGS.some((b) => b.id === out.binding)) out.binding = DEFAULTS.binding;
+    return out;
+  } catch { return DEFAULTS; }
+}
+
+function loadTested(): Set<string> {
+  try {
+    const raw = localStorage.getItem(TESTED_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch { return new Set(); }
+}
+
+function store(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* not kept, still works */ }
+}
+
 const BINDINGS: Array<{
   id: BindingChoice; title: string; desc: string; Diagram: typeof SaddleDiagram;
 }> = [
@@ -74,7 +105,7 @@ const BINDINGS: Array<{
     Diagram: DraftDiagram,
   },
   {
-    id: "none", title: "Margins only",
+    id: "none", title: "No booklet, trim only",
     desc: "No reordering — just trim whitespace so the text prints larger.",
     Diagram: MarginsDiagram,
   },
@@ -154,7 +185,20 @@ export default function App() {
   const doc = active?.doc ?? null;
   const pageCount = active?.pageCount ?? 0;
   const file = sources[0] ?? null;
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  /** Said once per launch when last time's settings were brought back. */
+  const [restored, setRestored] = useState(
+    () => JSON.stringify(settings) !== JSON.stringify(DEFAULTS));
+  useEffect(() => store(SETTINGS_KEY, settings), [settings]);
+  const [tested, setTested] = useState<ReadonlySet<string>>(loadTested);
+  const markTested = useCallback((key: string) => setTested((t) => {
+    const n = new Set(t); n.add(key); store(TESTED_KEY, [...n]); return n;
+  }), []);
+  const [assembly, setAssembly] = useState<"closed" | "open" | "printed" | "saved">("closed");
+  const [pickBinding, setPickBinding] = useState(false);
+  const [confirm, setConfirm] = useState<null | { action: "close" | "replace"; files?: File[] }>(null);
+  const [printFailure, setPrintFailure] = useState<string | null>(null);
+  const replaceInput = useRef<HTMLInputElement>(null);
   const [crop, setCrop] = useState<Bounds>(FULL_PAGE);
   const [scanning, setScanning] = useState(0); // 0-1 progress, 0 = idle
   const [output, setOutput] = useState<OutputInfo | null>(null);
@@ -360,8 +404,7 @@ export default function App() {
       // An aborted scan is the expected outcome of cancelling or closing.
     } finally {
       if (blankAbort.current === ac) blankAbort.current = null;
-      if (!ac.signal.aborted) setBlankScan(0);
-      else setBlankScan(0);
+      setBlankScan(0);
     }
   }, [doc, selection]);
 
@@ -410,8 +453,10 @@ export default function App() {
   useEffect(() => {
     if (parts.length === 0) return;
     const id = ++buildId.current;
+    // Busy from the moment anything changes, not only once the debounce ends:
+    // a print sent in between would carry the bytes of the previous settings.
+    setBuilding(true);
     const timer = setTimeout(async () => {
-      setBuilding(true);
       try {
         // One source goes in as it is; several are merged first, and the
         // merged document's every page takes part.
@@ -488,6 +533,8 @@ export default function App() {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2200);
+    // A saved booklet still has to be printed and bound: the steps follow.
+    if (settings.binding !== "none") setAssembly("saved");
   }, [output, file, multi, sources.length, totalKept, settings.binding,
     selection.keptCount, selection.removedCount, pageCount]);
 
@@ -523,6 +570,9 @@ export default function App() {
     if (result.ok) {
       setPrinted(true);
       setTimeout(() => setPrinted(false), 2200);
+      // The whole job is out: what comes next is folding, cutting and binding,
+      // so the steps stay on screen until they are dismissed.
+      if (!options.pageRanges || options.pageRanges.length === 0) setAssembly("printed");
     }
     return result;
   }, []);
@@ -549,7 +599,8 @@ export default function App() {
 
   const openPrint = useCallback(() => {
     if (!built.current) return;
-    if (!window.desktop?.print) { printInBrowser(); return; }
+    if (!window.desktop?.print) { printInBrowser(); setAssembly("printed"); return; }
+    setPrintFailure(null);
     setPrintOpen(true);
   }, [printInBrowser]);
 
@@ -560,19 +611,47 @@ export default function App() {
     // first print is always a deliberate one.
     if (!bridge || !printPrefs.deviceName) { openPrint(); return; }
     const twoUp = settings.binding !== "none";
+    // Printing silently with a flip nobody has checked is how a stack of
+    // upside-down backs happens; the panel walks through the test instead.
+    if (twoUp && !tested.has(testKey(printPrefs.deviceName, settings.duplexFlip))) {
+      openPrint(); return;
+    }
     const sheet = twoUp ? Math.floor(side / 2) + 1 : side + 1;
     const result = await sendJob({
       ...printPrefs,
+      duplex: twoUp ? (settings.duplexFlip === "short" ? "shortEdge" : "longEdge") : printPrefs.duplex,
       pageRanges: sheetsToPageRanges([sheet], twoUp),
       silent: true,
     });
     // A printer that has gone away is worth saying out loud, and the panel is
     // where it gets fixed.
     if (!result.ok && !result.cancelled) {
-      setError(result.reason ?? "The sheet could not be printed.");
+      setPrintFailure(result.reason ?? "The sheet could not be printed.");
       setPrintOpen(true);
     }
-  }, [printPrefs, settings.binding, side, sendJob, openPrint]);
+  }, [printPrefs, settings.binding, settings.duplexFlip, tested, side, sendJob, openPrint]);
+
+  /* ── leaving a job ─────────────────────────────────────────────────────
+     Close and Replace drop every page choice, crop and merged source. That
+     is only asked about when there is something to lose. */
+  const hasWork = multi || selection.removedCount > 0 || settings.cropEnabled;
+
+  const requestClose = useCallback(() => {
+    if (hasWork) setConfirm({ action: "close" }); else closeFile();
+  }, [hasWork, closeFile]);
+
+  const requestReplace = useCallback((fs: File[]) => {
+    if (fs.length === 0) return;
+    if (hasWork) setConfirm({ action: "replace", files: fs }); else openFiles(fs, "replace");
+  }, [hasWork, openFiles]);
+
+  const confirmLeave = useCallback(() => {
+    const c = confirm;
+    setConfirm(null);
+    if (!c) return;
+    if (c.action === "close") closeFile();
+    else if (c.files) openFiles(c.files, "replace");
+  }, [confirm, closeFile, openFiles]);
 
   /* Ctrl/Cmd+P opens the panel rather than the browser's own print. */
   useEffect(() => {
@@ -605,7 +684,18 @@ export default function App() {
   // that — not whether the job is a book — is what these controls depend on.
   const isTwoUp = settings.binding !== "none";
 
-  if (!file) return <Landing onFiles={(fs) => openFiles(fs, "replace")} error={error} update={update} />;
+  // With a printer to hand, printing is where the job ends; the browser build
+  // can only hand a file over, so there exporting is.
+  const printFirst = Boolean(window.desktop?.print);
+  const flipTested = Boolean(printPrefs.deviceName)
+    && tested.has(testKey(printPrefs.deviceName!, settings.duplexFlip));
+
+  if (!file) {
+    return <Landing onFiles={(fs) => openFiles(fs, "replace")} error={error} update={update}
+      binding={settings.binding} onBinding={(b) => set("binding", b)} />;
+  }
+
+  const chosen = BINDINGS.find((b) => b.id === settings.binding)!;
 
   return (
     <div className="app">
@@ -615,55 +705,65 @@ export default function App() {
           <strong>{multi ? `${file.name} + ${sources.length - 1} more` : file.name}</strong>
           <span className="rule-v" />
           <span>{jobPages}</span>
-          <button className="btn ghost sm" title="Close this file" onClick={closeFile}>
-            Close
-          </button>
         </span>
         <div className="spacer" />
-        {/* A label wrapping a hidden input is not focusable, so the control is
-            given a button's role and keyboard activation of its own. */}
-        <label className="btn sm" style={{ cursor: "pointer" }} role="button" tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter" && e.key !== " ") return;
-            e.preventDefault();
-            e.currentTarget.querySelector("input")?.click();
-          }}>
-          Replace
-          <input type="file" accept="application/pdf,.pdf" multiple hidden
-            onChange={(e) => {
-              const fs = [...(e.target.files ?? [])];
-              if (fs.length) openFiles(fs, "replace");
-              e.target.value = "";
-            }} />
-        </label>
-        <button className="btn" onClick={openPrint} disabled={!output || building}
-          title="Print the booklet (Ctrl+P)">
-          {printed ? "Sent ✓" : "Print"}
+        <button type="button" className="btn ghost sm" onClick={requestClose}>Close</button>
+        <button type="button" className="btn sm" onClick={() => replaceInput.current?.click()}>
+          Replace…
         </button>
-        <button className="btn primary" onClick={exportPdf} disabled={!output || building}>
+        <input ref={replaceInput} type="file" name="replace-pdf" accept="application/pdf,.pdf" multiple hidden
+          tabIndex={-1} aria-hidden="true"
+          onChange={(e) => {
+            requestReplace([...(e.target.files ?? [])]);
+            e.target.value = "";
+          }} />
+        <span className="rule-v tall" aria-hidden="true" />
+        <button className={printFirst ? "btn" : "btn primary"} onClick={exportPdf}
+          disabled={!output || building}>
           {saved ? "Saved ✓" : "Export PDF"}
+        </button>
+        <button className={printFirst ? "btn primary" : "btn"} onClick={openPrint}
+          disabled={!output || building} title="Print the booklet (Ctrl+P)">
+          {printed ? "Sent ✓" : printFirst ? "Print booklet…" : "Print"}
         </button>
       </header>
       <UpdateBar {...update} />
 
       <div className="body">
         <aside className="column">
-          {error && <div className="error">{error}</div>}
+          <div className="alert-slot" role="alert">
+            {error && <div className="error">{error}</div>}
+          </div>
+          {restored && (
+            <div className="restored" role="status">
+              <span>Using your last settings.</span>
+              <button type="button" className="link-btn"
+                onClick={() => { setSettings(DEFAULTS); setCrop(detected?.shared ?? FULL_PAGE); setRestored(false); }}>
+                Reset to defaults
+              </button>
+              <button type="button" className="link-btn" onClick={() => setRestored(false)}
+                aria-label="Keep these settings">Keep</button>
+            </div>
+          )}
 
           <section className="section">
             <h2><span className="step">01</span>Binding</h2>
-            <div className="cards">
-              {BINDINGS.map(({ id, title, desc, Diagram }) => (
-                <button key={id} type="button" className="card" aria-pressed={settings.binding === id}
-                  onClick={() => set("binding", id)}>
-                  <figure><Diagram /></figure>
-                  <span>
-                    <span className="title">{title}</span>
-                    <span className="desc">{desc}</span>
-                  </span>
+            {pickBinding ? (
+              <BindingPicker value={settings.binding}
+                onChange={(b) => { set("binding", b); setPickBinding(false); }} />
+            ) : (
+              <div className="chosen">
+                <figure><chosen.Diagram /></figure>
+                <span>
+                  <span className="title">{chosen.title}</span>
+                  <span className="desc">{chosen.desc}</span>
+                </span>
+                <button type="button" className="btn ghost sm" onClick={() => setPickBinding(true)}
+                  aria-label={`Change binding, now ${chosen.title}`}>
+                  Change
                 </button>
-              ))}
-            </div>
+              </div>
+            )}
           </section>
 
           <section className="section">
@@ -692,7 +792,7 @@ export default function App() {
           </section>
 
           <section className="section">
-            <h2><span className="step">03</span>Paper</h2>
+            <h2><span className="step">03</span>Layout</h2>
             <Field label="Sheet size"
               hint={isTwoUp ? "Sheets print landscape, two pages per side." : undefined}>
               <Select value={settings.paperId} onChange={(v) => set("paperId", v)}
@@ -709,12 +809,26 @@ export default function App() {
                 <Slider min={0} max={40} value={settings.gutter} onChange={(v) => set("gutter", v)} />
               </Field>
             )}
+            {settings.binding === "saddle" && (
+              <Field label="Booklets of"
+                value={settings.sheetsPerSignature === 0 ? "all sheets" : `${settings.sheetsPerSignature} sheets`}
+                hint="Thick books fold badly. Split them into smaller folded booklets (signatures), then bind those together.">
+                <Slider min={0} max={12} value={settings.sheetsPerSignature}
+                  onChange={(v) => set("sheetsPerSignature", v)} />
+              </Field>
+            )}
+            {isTwoUp && (
+              <Field label="">
+                <Switch label="Right-to-left" sub="Arabic, Hebrew, Japanese"
+                  checked={settings.rtl} onChange={(v) => set("rtl", v)} />
+              </Field>
+            )}
           </section>
 
           <section className="section">
             <h2><span className="step">04</span>Margins</h2>
             <Field label="">
-              <Switch label="Trim page margins"
+              <Switch label="Trim white margins"
                 sub={scanning ? "Measuring content…" : detected ? "Content measured automatically" : "Detects the printed area"}
                 checked={settings.cropEnabled} onChange={(v) => set("cropEnabled", v)} />
             </Field>
@@ -742,21 +856,28 @@ export default function App() {
 
           {isTwoUp && (
             <section className="section">
-              <h2><span className="step">05</span>Printing</h2>
-              <Field label="Duplex flip"
-                hint="If the back of a sheet comes out upside down, switch this.">
-                <Segmented value={settings.duplexFlip} onChange={(v) => set("duplexFlip", v)}
-                  options={[
-                    { value: "short", label: "Short edge" },
-                    { value: "long", label: "Long edge" },
-                  ]} />
-              </Field>
-              {settings.binding === "saddle" && (
-                <Field label="Signature size"
-                  value={settings.sheetsPerSignature === 0 ? "one booklet" : `${settings.sheetsPerSignature} sheets`}
-                  hint="Thick books fold badly. Split them into signatures, then bind the signatures together.">
-                  <Slider min={0} max={12} value={settings.sheetsPerSignature}
-                    onChange={(v) => set("sheetsPerSignature", v)} />
+              <h2><span className="step">05</span>Sheet</h2>
+              {printFirst ? (
+                // On the desktop the test sheet owns the flip: here it is only reported.
+                <Field label="Paper turns over on">
+                  <button type="button" className="flip-status" onClick={openPrint}
+                    disabled={!output || building}>
+                    <span>{settings.duplexFlip === "short" ? "Short edge" : "Long edge"}</span>
+                    <span className={flipTested ? "badge ok" : "badge"}>
+                      {flipTested ? "Tested ✓" : "Not tested"}
+                    </span>
+                    <span className="flip-go">{flipTested ? "Change in Print" : "Test in Print"} →</span>
+                  </button>
+                </Field>
+              ) : (
+                <Field label="Paper turns over on"
+                  hint="Match your printer's double-sided setting. If backs come out upside down, switch this.">
+                  <Segmented label="Paper turns over on" value={settings.duplexFlip}
+                    onChange={(v) => set("duplexFlip", v)}
+                    options={[
+                      { value: "short", label: "Short edge" },
+                      { value: "long", label: "Long edge" },
+                    ]} />
                 </Field>
               )}
               {/* A draft is neither folded nor cut, so there is no guide to draw. */}
@@ -771,19 +892,8 @@ export default function App() {
                 <Switch label="Trim marks" sub="Corner marks for cutting the fore-edge"
                   checked={settings.cropMarks} onChange={(v) => set("cropMarks", v)} />
               </Field>
-              <Field label="">
-                <Switch label="Right-to-left" sub="Arabic, Hebrew, Japanese"
-                  checked={settings.rtl} onChange={(v) => set("rtl", v)} />
-              </Field>
             </section>
           )}
-
-          <section className="section">
-            <h2>How to assemble</h2>
-            <ol>
-              {ASSEMBLY[settings.binding].map((s) => <li key={s}>{s}</li>)}
-            </ol>
-          </section>
         </aside>
 
         <main>
@@ -819,15 +929,27 @@ export default function App() {
                   drawThumbnail={drawThumbnail} />
               </div>
             } />
+          {assembly !== "closed" && (
+            <Assembly binding={settings.binding} title={chosen.title}
+              sheets={output?.sheets ?? sheets}
+              done={assembly === "printed" || assembly === "saved" ? assembly : null}
+              onClose={() => setAssembly("closed")} />
+          )}
           <div className="colophon">
+            <button type="button" className="stat stat-action"
+              aria-expanded={assembly !== "closed"} aria-controls="assembly"
+              onClick={() => setAssembly((a) => (a === "closed" ? "open" : "closed"))}>
+              <span className="k">Next</span>
+              <span className="v">How to assemble <span aria-hidden="true">→</span></span>
+            </button>
             <Stat k={multi ? `Sources · ${sources.length} files` : "Source"}
               v={totalKept === totalPages ? `${totalPages} pages` : `${totalKept} of ${totalPages} pages`} />
             {isTwoUp ? (
               <>
                 <Stat k="Sheets of paper" v={`${output?.sheets ?? sheets}`} />
                 <Stat k="Printed sides" v={`${output?.pages ?? sheets * 2}`} />
-                <Stat k="Blank slots" v={`${output?.blanks ?? blankCount(totalKept)}`} />
-                <Stat k="Duplex" v={settings.duplexFlip === "short" ? "Flip short edge" : "Flip long edge"} />
+                <Stat k="Blank pages added" v={`${output?.blanks ?? blankCount(totalKept)}`} />
+                <Stat k="Turns over on" v={settings.duplexFlip === "short" ? "Short edge" : "Long edge"} />
               </>
             ) : (
               <Stat k="Output pages" v={`${output?.pages ?? totalKept}`} />
@@ -837,6 +959,11 @@ export default function App() {
                 ? `${Math.round((crop.left + crop.right) * 100)}% wide, ${Math.round((crop.top + crop.bottom) * 100)}% tall`
                 : "per page"} />
             )}
+            <div className="spacer" />
+            <span key={printed ? "p" : saved ? "s" : "i"} role="status"
+              className={printed || saved ? "stamp fresh" : "stamp idle"}>
+              {printed ? "Sent to press" : saved ? "Saved" : "Proof"}
+            </span>
           </div>
         </main>
       </div>
@@ -848,10 +975,104 @@ export default function App() {
             ? (output?.sheets ?? sheets)
             : (output?.pages ?? totalKept)}
           currentSheet={isTwoUp ? Math.floor(side / 2) + 1 : side + 1}
+          flip={settings.duplexFlip}
+          onFlip={(f) => set("duplexFlip", f)}
+          building={building}
+          tested={tested}
+          onTested={markTested}
+          initialFailure={printFailure}
           onClose={() => setPrintOpen(false)}
           onPrint={sendJob} />
       )}
+
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.action === "close" ? "Close this job?" : "Replace this job?"}
+          body={`Your page choices${settings.cropEnabled ? ", trim" : ""}${multi ? " and the other merged files" : ""} will be dropped. The PDF on disk is not touched.`}
+          confirmLabel={confirm.action === "close" ? "Close job" : "Replace"}
+          onConfirm={confirmLeave}
+          onCancel={() => setConfirm(null)} />
+      )}
     </div>
+  );
+}
+
+/** The four methods as a radio group: arrow keys move, the choice follows focus. */
+function BindingPicker({ value, onChange, variant = "list" }: {
+  value: BindingChoice; onChange: (b: BindingChoice) => void; variant?: "list" | "directory";
+}) {
+  const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const at = BINDINGS.findIndex((b) => b.id === value);
+  useEffect(() => { if (variant === "list") refs.current[at]?.focus(); }, []); // opened to choose
+  const onKey = (e: React.KeyboardEvent, i: number) => {
+    const d = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1
+      : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
+    if (!d) return;
+    e.preventDefault();
+    const j = (i + d + BINDINGS.length) % BINDINGS.length;
+    refs.current[j]?.focus();
+    onChange(BINDINGS[j]!.id);
+  };
+  return (
+    <div className={variant === "list" ? "cards" : "directory"} role="radiogroup"
+      aria-label="Binding">
+      {BINDINGS.map(({ id, title, desc, Diagram }, i) => (
+        <button key={id} ref={(el) => { refs.current[i] = el; }} type="button"
+          className={variant === "list" ? "card" : "directory-cell"}
+          role="radio" aria-checked={value === id} tabIndex={value === id ? 0 : -1}
+          onKeyDown={(e) => onKey(e, i)}
+          onClick={() => onChange(id)}>
+          {variant === "list" ? (
+            <>
+              <figure><Diagram /></figure>
+              <span>
+                <span className="title">{title}</span>
+                <span className="desc">{desc}</span>
+              </span>
+            </>
+          ) : (
+            <>
+              <Diagram width={96} height={64} />
+              <span className="name">{title}</span>
+              <span className="what">{desc}</span>
+              {id === "saddle" && <span className="tip">Good first choice for up to about 60 pages</span>}
+            </>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What to do with the paper once it is printed. Opened from the colophon at
+ * any time, and on its own after a whole job has gone to the printer — the
+ * point where the reader needs it most.
+ */
+function Assembly({ binding, title, sheets, done, onClose }: {
+  binding: BindingChoice; title: string; sheets: number;
+  done: "printed" | "saved" | null; onClose: () => void;
+}) {
+  const plural = `${sheets} sheet${sheets === 1 ? "" : "s"}`;
+  const head = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { head.current?.focus(); }, []);
+  return (
+    <aside className="assembly" id="assembly" aria-labelledby="assembly-title">
+      <header>
+        <p className="assembly-status">
+          {done === "printed" ? `Sent to the printer · ${plural}`
+            : done === "saved" ? `Saved · ${plural}` : title}
+        </p>
+        <button type="button" className="btn ghost sm" onClick={onClose}>Done</button>
+      </header>
+      <h2 id="assembly-title" ref={head} tabIndex={-1}>
+        {done === "printed" ? <>Now, <em>bind it</em></>
+          : done === "saved" ? <>Then, <em>bind it</em></> : "How to assemble"}
+      </h2>
+      <ol>
+        {ASSEMBLY[binding].map((s) => <li key={s}>{s}</li>)}
+      </ol>
+    </aside>
   );
 }
 
@@ -864,13 +1085,15 @@ function Stat({ k, v }: { k: string; v: string }) {
  * plate on the right, and the four methods below as a directory of hairline
  * cells — the reference magazine's directory spread.
  */
-function Landing({ onFiles, error, update }: {
+function Landing({ onFiles, error, update, binding, onBinding }: {
   onFiles: (files: File[]) => void;
   error: string | null;
   update: ReturnType<typeof useUpdate>;
+  binding: BindingChoice;
+  onBinding: (b: BindingChoice) => void;
 }) {
   return (
-    <div className="app">
+    <div className="app cover-app">
       <header className="masthead">
         <Wordmark />
         <div className="spacer" />
@@ -882,7 +1105,6 @@ function Landing({ onFiles, error, update }: {
         <div className="cover-inner">
           <div className="spread">
             <div>
-              <p className="kicker">Booklet imposition · Margin trimming · Offline</p>
               <h1>Turn any PDF<br />into a <em>booklet</em></h1>
               <p className="standfirst">
                 Reorder pages for stitched or perfect binding, print a two-up draft
@@ -892,32 +1114,17 @@ function Landing({ onFiles, error, update }: {
             </div>
             <div>
               <Dropzone onFiles={onFiles} />
-              {error && <div className="error">{error}</div>}
+              <div role="alert" aria-live="assertive">
+                {error && <div className="error">{error}</div>}
+              </div>
             </div>
           </div>
 
           <div className="directory-head">
-            <h2>Binding directory</h2>
-            <p>Four ways to turn a stack of paper into something you can read</p>
+            <h2>What are you making?</h2>
+            <p>Pick one now or later — you can change it at any time</p>
           </div>
-          <div className="directory">
-            {BINDINGS.map(({ id, title, desc, Diagram }) => (
-              <div key={id}>
-                <Diagram width={96} height={64} />
-                <div className="name">{title}</div>
-                <div className="what">{desc}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="cover-foot">
-            <div className="imprint">
-              Perfect Binding<br />
-              Imposition, trimming, and a sheet-by-sheet proof<br />
-              The PDF never leaves this computer
-            </div>
-            <div className="folio-mark" aria-hidden="true">04</div>
-          </div>
+          <BindingPicker variant="directory" value={binding} onChange={onBinding} />
         </div>
       </div>
     </div>
@@ -927,7 +1134,7 @@ function Landing({ onFiles, error, update }: {
 function Wordmark() {
   return (
     <span className="wordmark">
-      <Logo /> Perfect Binding<span className="star">*</span>
+      <Logo /> Perfect Binding
     </span>
   );
 }
@@ -938,7 +1145,7 @@ function Logo() {
     <svg width="22" height="18" viewBox="0 0 22 18" fill="none" aria-hidden="true">
       <path d="M11 3.4C8.6 1.6 4.8 1.2 1.2 2v13.4c3.6-.8 7.4-.4 9.8 1.4 2.4-1.8 6.2-2.2 9.8-1.4V2c-3.6-.8-7.4-.4-9.8 1.4Z"
         stroke="var(--ink)" strokeWidth="1.1" strokeLinejoin="round" />
-      <path d="M11 3.4v13.4" stroke="var(--spot)" strokeWidth="1.4" />
+      <path d="M11 3.4v13.4" stroke="var(--spot)" strokeWidth="1.6" />
     </svg>
   );
 }

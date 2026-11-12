@@ -20,11 +20,12 @@ export function Field({ label, value, children, hint }: {
   );
 }
 
-export function Segmented<T extends string>({ value, onChange, options }: {
+export function Segmented<T extends string>({ value, onChange, options, label }: {
   value: T; onChange: (v: T) => void; options: Array<{ value: T; label: string; title?: string }>;
+  label?: string;
 }) {
   return (
-    <div className="seg" role="group">
+    <div className="seg" role="group" aria-label={label}>
       {options.map((o) => (
         <button key={o.value} type="button" title={o.title}
           aria-pressed={value === o.value} onClick={() => onChange(o.value)}>

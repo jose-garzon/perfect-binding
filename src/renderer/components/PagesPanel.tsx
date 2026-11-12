@@ -49,6 +49,8 @@ export function PagesPanel({
         <input
           className={`control${invalid ? " invalid" : ""}`}
           type="text"
+          name="pages-kept"
+          id="pages-kept"
           inputMode="numeric"
           spellCheck={false}
           value={text}
@@ -75,15 +77,20 @@ export function PagesPanel({
             Remove blanks
           </button>
         )}
-        <button type="button" className="btn sm ghost" onClick={onInvert}>Invert</button>
-        <button type="button" className="btn sm ghost" onClick={onRestoreAll}
-          disabled={removedCount === 0}>
-          Restore all
-        </button>
-        <button type="button" className="btn sm ghost" onClick={onUndo} disabled={!canUndo}
-          title="Undo the last page change (Ctrl+Z)">
-          Undo
-        </button>
+        {/* Invert and Restore mean nothing until a page is out, and Undo until
+            something changed: they appear when they can act, not greyed out. */}
+        {removedCount > 0 && (
+          <>
+            <button type="button" className="btn sm ghost" onClick={onInvert}>Invert</button>
+            <button type="button" className="btn sm ghost" onClick={onRestoreAll}>Restore all</button>
+          </>
+        )}
+        {canUndo && (
+          <button type="button" className="btn sm ghost" onClick={onUndo}
+            title="Undo the last page change (Ctrl+Z)">
+            Undo
+          </button>
+        )}
       </div>
 
       {scanning > 0 && (

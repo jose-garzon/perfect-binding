@@ -1,54 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Perfect Binding app mark: a magazine standing cover-out, its glued spine
-       turned toward the viewer. Palette is the app's own. Source of truth for
-       every raster icon; run `bun run icon` after editing. -->
-  <defs>
-    <linearGradient id="ground" x1="0" y1="0" x2=".4" y2="1">
-      <stop offset="0" stop-color="#2a2521"/>
-      <stop offset="1" stop-color="#100e0c"/>
-    </linearGradient>
-    <linearGradient id="cover" x1="0" y1="0" x2=".9" y2="1">
-      <stop offset="0" stop-color="#fffefb"/>
-      <stop offset="1" stop-color="#f0eadd"/>
-    </linearGradient>
-    <linearGradient id="spine" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#cdc5b4"/>
-      <stop offset="1" stop-color="#f7f3ea"/>
-    </linearGradient>
-    <filter id="drop" x="-30%" y="-30%" width="170%" height="170%">
-      <feDropShadow dx="-10" dy="34" stdDeviation="30" flood-color="#000000" flood-opacity=".5"/>
-    </filter>
-  </defs>
+  <!-- Perfect Binding app mark, in the job-docket world: a goldenrod work order
+       carrying an open booklet in carbon ink, its stitched spine in stamp
+       magenta, framed by printer's trim marks. Source of truth for every
+       raster icon; run `bun run icon` after editing. -->
+  <rect width="1024" height="1024" rx="224" fill="#f0c030"/>
+  <!-- a darker band across the foot, like the docket's tear-off stub -->
+  <path d="M0 800 H1024 V800 C1024 924 924 1024 800 1024 H224 C100 1024 0 924 0 800 Z" fill="#e2ae17"/>
+  <line x1="96" y1="800" x2="928" y2="800" stroke="#161b2b" stroke-width="10" stroke-dasharray="26 18"/>
 
-  <rect width="1024" height="1024" rx="224" fill="url(#ground)"/>
-
-  <g filter="url(#drop)">
-    <!-- the spine: the folded-and-glued edge the whole app is named for -->
-    <path d="M246 262 L318 200 L318 856 L246 918 Z" fill="url(#spine)"/>
-    <path d="M246 262 L318 200 L318 856 L246 918 Z" fill="#12110f" opacity=".1"/>
-
-    <!-- cover -->
-    <path d="M318 200 L790 200 L790 856 L318 856 Z" fill="url(#cover)"/>
-    <!-- the gutter shadow next to the spine -->
-    <rect x="318" y="200" width="40" height="656" fill="#12110f" opacity=".07"/>
-
-    <!-- fore-edge: the trimmed page block -->
-    <g fill="#12110f" opacity=".16">
-      <rect x="790" y="200" width="6" height="656"/>
-      <rect x="800" y="208" width="4" height="640" opacity=".7"/>
-    </g>
-
-    <!-- masthead -->
-    <rect x="386" y="252" width="352" height="62" rx="10" fill="#12110f"/>
-
-    <!-- cover story -->
-    <rect x="386" y="360" width="352" height="268" rx="6" fill="#b3402a"/>
-
-    <!-- coverlines -->
-    <rect x="386" y="672" width="264" height="24" rx="12" fill="#12110f"/>
-    <g fill="#12110f" opacity=".45">
-      <rect x="386" y="722" width="352" height="16" rx="8"/>
-      <rect x="386" y="758" width="300" height="16" rx="8"/>
-    </g>
+  <!-- trim marks -->
+  <g stroke="#161b2b" stroke-width="12" stroke-linecap="square">
+    <path d="M150 230 H220 M230 150 V220"/>
+    <path d="M874 230 H804 M794 150 V220"/>
+    <path d="M150 700 H220 M230 780 V710"/>
+    <path d="M874 700 H804 M794 780 V710"/>
   </g>
+
+  <!-- the open booklet -->
+  <g stroke="#161b2b" stroke-width="22" stroke-linejoin="round">
+    <path d="M512 296 C440 250 340 238 262 258 V676 C340 656 440 668 512 714 Z" fill="#ffffff"/>
+    <path d="M512 296 C584 250 684 238 762 258 V676 C684 656 584 668 512 714 Z" fill="#ffffff"/>
+  </g>
+  <!-- text lines -->
+  <g stroke="#161b2b" stroke-width="14" stroke-linecap="round" opacity=".55">
+    <path d="M316 360 C370 350 418 356 460 372"/>
+    <path d="M316 420 C370 410 418 416 460 432"/>
+    <path d="M316 480 C370 470 418 476 460 492"/>
+    <path d="M564 372 C606 356 654 350 708 360"/>
+    <path d="M564 432 C606 416 654 410 708 420"/>
+    <path d="M564 492 C606 476 654 470 708 480"/>
+  </g>
+  <!-- the stitched spine -->
+  <g stroke="#c0145a" stroke-width="20" stroke-linecap="round">
+    <line x1="512" y1="350" x2="512" y2="430"/>
+    <line x1="512" y1="580" x2="512" y2="660"/>
+  </g>
+
+  <!-- docket field on the stub -->
+  <rect x="380" y="852" width="264" height="92" fill="none" stroke="#161b2b" stroke-width="12"/>
+  <rect x="412" y="884" width="200" height="28" fill="#161b2b"/>
 </svg>

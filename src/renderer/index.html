@@ -1,8 +1,10 @@
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Perfect Binding</title>
+    <link rel="icon" type="image/png" href="../../assets/icons/64x64.png" />
     <!--
       Declared here rather than in app.css on purpose: Bun's CSS bundler
       resolves and inlines small url() assets as data: URIs, which the Electron
@@ -11,25 +13,19 @@
     -->
     <style>
       @font-face {
-        font-family: "Archivo";
+        font-family: "Schibsted Grotesk";
         font-style: normal;
-        font-weight: 400 700;
+        font-weight: 400 900;
         font-display: swap;
-        src: url("./fonts/archivo-latin.woff2") format("woff2");
+        src: url("./fonts/schibsted-grotesk-latin.woff2") format("woff2");
       }
       @font-face {
-        font-family: "Newsreader";
+        font-family: "Martian Mono";
         font-style: normal;
-        font-weight: 400 700;
+        font-weight: 100 800;
+        font-stretch: 75% 112.5%;
         font-display: swap;
-        src: url("./fonts/newsreader-latin.woff2") format("woff2");
-      }
-      @font-face {
-        font-family: "Newsreader";
-        font-style: italic;
-        font-weight: 400 700;
-        font-display: swap;
-        src: url("./fonts/newsreader-latin-italic.woff2") format("woff2");
+        src: url("./fonts/martian-mono-latin.woff2") format("woff2");
       }
     </style>
   </head>

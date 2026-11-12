@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({
     ...SIZE,
     show: true,
-    backgroundColor: "#faf8f4",
+    backgroundColor: "#eef0ee",
     webPreferences: { preload: path.join(__dirname, "..", "electron", "preload.cjs") },
   });
   await win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
@@ -61,19 +61,23 @@ app.whenReady().then(async () => {
   if (!await waitFor(win, "document.querySelector('.sheet canvas')?.width > 300", 30000)) {
     throw new Error("preview never rendered");
   }
+  await waitFor(win, "!document.querySelector('.busy') && !document.querySelector('.masthead .btn.primary:disabled')", 30000);
+  await new Promise((r) => setTimeout(r, 1200));
   await settle(win);
   await shoot(win, "editing.png");
 
   // margin trimming on: the crop panel and the enlarged print area
   await win.webContents.executeJavaScript(
-    `[...document.querySelectorAll('.switch')].find(l => l.innerText.includes('Trim page margins'))
-       .querySelector('input').click(), true`);
+    `[...document.querySelectorAll('.switch')].find(l => l.innerText.includes('Trim white margins'))
+       .querySelector('input:not(:checked)')?.click(), true`);
   if (!await waitFor(win, "!!document.querySelector('.crop-preview canvas')?.width", 30000)) {
     throw new Error("crop panel never appeared");
   }
   // the crop panel sits below the fold in the sidebar
   await win.webContents.executeJavaScript(
     "document.querySelector('.crop-preview').scrollIntoView({ block: 'center' }), true");
+  await waitFor(win, "!document.querySelector('.busy') && !document.querySelector('.masthead .btn.primary:disabled')", 30000);
+  await new Promise((r) => setTimeout(r, 1200));
   await settle(win);
   await shoot(win, "trim.png");
 

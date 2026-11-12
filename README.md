@@ -44,7 +44,7 @@ Everything runs locally — the PDF never leaves the machine.
   the one outbound call in the app is the update check below, and it can be
   switched off.
 
-![The working view: binding cards, paper controls, and the sheet proof](assets/screenshots/editing.png)
+![The working view: the goldenrod job docket of settings, the sheet proof, and the job ticket of print numbers](assets/screenshots/editing.png)
 
 Margin trimming on, with the detected content box and the four edge nudges:
 
@@ -146,8 +146,8 @@ exactly one sheet per signature and nothing more, so it is now reached by pickin
 Removal is a selection, not an edit: the app keeps the set of removed source
 pages and passes the kept ones to the builder, so the loaded bytes stay
 untouched and any removal can be undone. Imposition is computed over the kept
-count, which is why dropping two pages can save a whole sheet — the colophon
-updates as you go. Per-page crops stay attached to their own source page, so a
+count, which is why dropping two pages can save a whole sheet — the job ticket
+under the proof updates as you go. Per-page crops stay attached to their own source page, so a
 removal never slides a crop onto its neighbour.
 
 Blank detection is deliberately separate from the margin scan. That scan samples
@@ -226,6 +226,22 @@ within a second of a change.
 that is already being painted, which React Strict Mode triggers constantly.
 `renderPage` cancels any in-flight task for that canvas first.
 
+## Design
+
+The interface is set up like a print shop's job docket. The settings column is
+the goldenrod work order, with numbered fields filled in from top to bottom. The
+proof sits on a dot-grid plate with trim marks at the sheet corners and the fold
+or cut line drawn through it. Under it, the job ticket keeps the numbers that
+decide the print run in boxed mono figures, next to a rubber stamp that shows
+the job's state: *Proof*, *Saved* or *Sent to press*. Removed pages are stamped
+*Removed* rather than hidden.
+
+Type is Schibsted Grotesk for headings and interface, and Martian Mono for every
+count, measurement and folio. Colour does fixed jobs: goldenrod for the docket,
+carbon blue-black for ink, magenta only for state and the primary action. Light
+and dark both follow the system setting. Tokens live at the top of
+`src/renderer/app.css`.
+
 ## Layout
 
 ```
@@ -238,14 +254,15 @@ src/renderer/     React UI (no framework beyond React + hand-written CSS)
   lib/pdf.ts      pdf.js loading, page rendering, thumbnails, margin + blank scans
   lib/ranges.ts   the `1-4, 9, 12-` page-range syntax, parsed and formatted
   lib/selection.ts  which pages are kept, with undo — no bytes are touched
-  fonts/          Archivo and Newsreader, Latin subsets, SIL OFL (see OFL.txt)
+  fonts/          Schibsted Grotesk and Martian Mono, Latin subsets, SIL OFL (see OFL.txt)
 electron/         main, preload, the CSP response header, and the update check
 scripts/          dev launcher, icon rasteriser, screenshots, smoke test
 assets/           icon.svg (the source), its PNGs, and the README screenshots
 ```
 
-The app icon is drawn once in `assets/icon.svg` — a magazine standing cover-out,
-spine toward the viewer, in the same paper/ink/terracotta palette as the UI.
+The app icon is drawn once in `assets/icon.svg` — an open booklet with a
+stitched magenta spine, inside printer's trim marks, on the goldenrod job docket
+the UI is built around.
 Edit that file and run `bun run icon` to re-render every PNG size.
 
 ## Releasing
