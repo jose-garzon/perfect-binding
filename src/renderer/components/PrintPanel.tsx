@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Field, Segmented, Select, Slider, Switch } from "./Controls";
-import { parseRanges, sheetsToPageRanges } from "../lib/ranges";
+import { parseRanges, sheetsToPageRanges, splitSides } from "../lib/ranges";
 import {
   DEFAULT_PRINT_PREFS,
   type Duplex, type PrintOptions, type PrintPrefs, type Printer, type PrintResult,
@@ -71,6 +71,11 @@ export function PrintPanel({
   const [busy, setBusy] = useState(false);
   /** The test sheet's progress: not sent, out and waiting for an answer, or re-flipped. */
   const [check, setCheck] = useState<"idle" | "asking" | "flipped">("idle");
+  /**
+   * Backs held until the user has turned the printed fronts over by hand, and
+   * what happens once they are out: the panel closes, or the test asks its question.
+   */
+  const [backs, setBacks] = useState<null | { options: PrintOptions; then: "close" | "ask" }>(null);
   /** Paper, scale and colour are rarely changed; they wait behind a disclosure. */
   const [more, setMore] = useState(false);
 
@@ -163,6 +168,42 @@ export function PrintPanel({
     ...prefs, copies, duplex: twoUp ? duplexFor(flip) : prefs.duplex, pageRanges: ranges, silent,
   });
 
+  /** Output pages in the built file. */
+  const total = twoUp ? sheetCount * 2 : sheetCount;
+
+  /**
+   * Sends a job. A printer that cannot turn paper over gets the fronts only;
+   * the backs wait in `backs` until the stack has been turned by hand.
+   * Copies are spelled out page by page so fronts and backs stay paired.
+   */
+  async function dispatch(o: PrintOptions, then: "close" | "ask"): Promise<PrintResult & { waiting?: boolean }> {
+    if (!prefs.manualDuplex || o.duplex === "simplex" || !o.silent) return onPrint(o);
+    const sides = splitSides(o.pageRanges, total);
+    const repeat = (r: PrintOptions["pageRanges"] & object) =>
+      Array.from({ length: o.copies }, () => r).flat();
+    const single = { ...o, duplex: "simplex" as const, copies: 1 };
+    const result = await onPrint({ ...single, pageRanges: repeat(sides.fronts) });
+    if (!result.ok || sides.backs.length === 0) return result;
+    setBacks({ options: { ...single, pageRanges: repeat(sides.backs) }, then });
+    return { ...result, waiting: true };
+  }
+
+  async function sendBacks() {
+    if (!backs) return;
+    setBusy(true);
+    setFailure(null);
+    const result = await onPrint(backs.options);
+    setBusy(false);
+    if (!result.ok) {
+      if (!result.cancelled) setFailure(result.reason ?? "The backs could not be sent.");
+      return;
+    }
+    const then = backs.then;
+    setBacks(null);
+    if (then === "ask") setCheck("asking");
+    else onClose();
+  }
+
   async function send(silent: boolean) {
     if (scope === "range" && !(parsed && parsed.ok)) {
       setFailure(parsed ? parsed.error : `Enter at least one ${unit}.`);
@@ -170,13 +211,13 @@ export function PrintPanel({
     }
     setBusy(true);
     setFailure(null);
-    const result = await onPrint(options(pageRanges(), silent));
+    const result = await dispatch(options(pageRanges(), silent), "close");
     setBusy(false);
     if (result.ok) {
       // Only our own panel's choices are worth saving — the platform dialog
       // never says what was picked in it.
       if (silent) await window.desktop?.print?.prefs(options(undefined, true));
-      onClose();
+      if (!result.waiting) onClose();
       return;
     }
     if (result.cancelled) return; // the user meant that
@@ -186,11 +227,11 @@ export function PrintPanel({
   async function sendTest() {
     setBusy(true);
     setFailure(null);
-    const result = await onPrint(options(sheetsToPageRanges([1], true), true, 1));
+    const result = await dispatch(options(sheetsToPageRanges([1], true), true, 1), "ask");
     setBusy(false);
     if (result.ok) {
       await window.desktop?.print?.prefs(options(undefined, true));
-      setCheck("asking");
+      if (!result.waiting) setCheck("asking");
       return;
     }
     if (!result.cancelled) setFailure(result.reason ?? "The test sheet could not be sent.");
@@ -259,8 +300,37 @@ export function PrintPanel({
             </Field>
           )}
 
+          {(twoUp || prefs.duplex !== "simplex") && (
+            <Field label="">
+              <Switch label="Turn the paper over by hand"
+                sub={prefs.manualDuplex
+                  ? "Fronts print first, then the app waits for you"
+                  : "The printer prints both sides on its own"}
+                checked={prefs.manualDuplex}
+                onChange={(v) => { set("manualDuplex", v); setBacks(null); }} />
+            </Field>
+          )}
+
+          {backs && (
+            <div className="test-sheet" role="group" aria-labelledby="backs-title">
+              <p><strong id="backs-title">Fronts are printing.</strong> When they are done, take the
+                stack, turn it over on the {twoUp ? flip : (prefs.duplex === "shortEdge" ? "short" : "long")} edge
+                and put it back in the tray. Then print the backs.</p>
+              <div className="test-actions">
+                <button type="button" className="btn sm primary" onClick={sendBacks}
+                  disabled={busy || building}>
+                  Print the backs
+                </button>
+                <button type="button" className="btn sm ghost" onClick={() => setBacks(null)}
+                  disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* The one moment paper can be wasted in bulk, so it is checked on one sheet. */}
-          {twoUp && sheetCount > 1 && prefs.deviceName && (needsTest || check !== "idle") && (
+          {!backs && twoUp && sheetCount > 1 && prefs.deviceName && (needsTest || check !== "idle") && (
             <div className="test-sheet" role="group" aria-labelledby="test-sheet-title">
               <p className="sr-only" aria-live="polite">
                 {check === "asking" ? "Test sheet sent. Is the back the right way up?"
@@ -402,7 +472,7 @@ export function PrintPanel({
               <span className="busy"><i className="spinner" />{building ? "Rebuilding…" : "Sending…"}</span>
             )}
             <button type="button" className={needsTest ? "btn sm ghost" : "btn primary"}
-              onClick={() => send(true)} disabled={!canPrint || paper === 0}>
+              onClick={() => send(true)} disabled={!canPrint || paper === 0 || backs !== null}>
               {paper === 0
                 ? "Print"
                 : `${needsTest ? "Skip test, print" : "Print"} ${paper} ${unit}${paper === 1 ? "" : "s"}`}

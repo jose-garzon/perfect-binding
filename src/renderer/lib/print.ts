@@ -26,6 +26,11 @@ export interface PrintPrefs {
   paperName: string | null;
   /** Percent. Anything but 100 refits an imposition that is already final. */
   scale: number;
+  /**
+   * The printer cannot turn the paper over on its own: fronts print first, and
+   * the backs wait until the stack has been turned over by hand.
+   */
+  manualDuplex: boolean;
 }
 
 export const DEFAULT_PRINT_PREFS: PrintPrefs = {
@@ -35,6 +40,7 @@ export const DEFAULT_PRINT_PREFS: PrintPrefs = {
   color: true,
   paperName: null,
   scale: 100,
+  manualDuplex: false,
 };
 
 /** A cancelled system dialog is a refusal, not a failure: neither ok nor a reason. */

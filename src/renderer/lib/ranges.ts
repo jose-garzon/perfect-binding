@@ -104,3 +104,30 @@ export function sheetsToPageRanges(sheets: Iterable<number>, twoUp: boolean): Pa
   }
   return out;
 }
+
+/**
+ * Splits a duplex job into its two passes for a printer that cannot turn the
+ * paper over itself. Output page `2k` is a front and `2k+1` its back, so the
+ * fronts go out first, the stack is turned over by hand, and the backs follow.
+ * Empty `ranges` means every one of `total` pages. A front with no back (an
+ * odd last page) still prints; its sheet simply stays blank behind.
+ */
+export function splitSides(
+  ranges: PageRange[] | undefined,
+  total: number,
+): { fronts: PageRange[]; backs: PageRange[] } {
+  const wanted = new Set<number>();
+  if (!ranges || ranges.length === 0) {
+    for (let i = 0; i < total; i++) wanted.add(i);
+  } else {
+    for (const r of ranges) {
+      for (let i = Math.max(0, r.from); i <= Math.min(total - 1, r.to); i++) wanted.add(i);
+    }
+  }
+  const sorted = [...wanted].sort((a, b) => a - b);
+  const one = (i: number): PageRange => ({ from: i, to: i });
+  return {
+    fronts: sorted.filter((i) => i % 2 === 0).map(one),
+    backs: sorted.filter((i) => i % 2 === 1).map(one),
+  };
+}

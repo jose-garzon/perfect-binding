@@ -199,7 +199,11 @@ export default function App() {
   const [confirm, setConfirm] = useState<null | { action: "close" | "replace"; files?: File[] }>(null);
   const [printFailure, setPrintFailure] = useState<string | null>(null);
   const replaceInput = useRef<HTMLInputElement>(null);
-  const [crop, setCrop] = useState<Bounds>(FULL_PAGE);
+  /**
+   * The uniform crop, one box per source: merged PDFs rarely share margins, so
+   * each is trimmed by its own. Absent means "as measured".
+   */
+  const [crops, setCrops] = useState<Record<string, Bounds>>({});
   const [scanning, setScanning] = useState(0); // 0-1 progress, 0 = idle
   const [output, setOutput] = useState<OutputInfo | null>(null);
   const [building, setBuilding] = useState(false);
@@ -228,6 +232,13 @@ export default function App() {
   const totalPages = sources.reduce((n, s) => n + s.pageCount, 0);
   const totalKept = parts.reduce((n, p) => n + p.pages.length, 0);
   const multi = sources.length > 1;
+
+  const cropOf = useCallback((s: Source) => crops[s.id] ?? s.scan?.shared ?? FULL_PAGE, [crops]);
+  /** The active source's box: the one the crop panel shows and edits. */
+  const crop = active ? cropOf(active) : FULL_PAGE;
+  const setCrop = useCallback((b: Bounds) => {
+    if (activeId) setCrops((c) => ({ ...c, [activeId]: b }));
+  }, [activeId]);
 
   /** Margins of the job: per output page when merged, per source page otherwise. */
   const detected = useMemo<CropScan | null>(() => {
@@ -291,7 +302,7 @@ export default function App() {
     if (mode === "replace" || sourcesRef.current.length === 0) discardAll();
     for (const [id, bytes] of bytesFor) sourceBytes.current.set(id, bytes);
     if (mode === "replace" || sourcesRef.current.length === 0) {
-      setCrop(FULL_PAGE);
+      setCrops({});
       setSources(loaded);
       setActiveId(loaded[0]!.id);
     } else {
@@ -435,20 +446,15 @@ export default function App() {
     return () => ac.abort();
   }, [pendingScan]);
 
-  // The uniform crop starts from what was measured, and again when the set of
-  // documents changes what that is.
-  const sharedKey = detected ? JSON.stringify(detected.shared) : "";
-  useEffect(() => {
-    if (detected) setCrop(detected.shared);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sharedKey]);
-
   /* ── rebuild the booklet whenever anything changes ─────────────────── */
   const activeCrop = useMemo<Bounds | Bounds[] | null>(() => {
     if (!settings.cropEnabled) return null;
-    if (settings.uniformCrop || !detected) return crop;
-    return detected.perPage;
-  }, [settings.cropEnabled, settings.uniformCrop, crop, detected]);
+    if (!settings.uniformCrop && detected) return detected.perPage;
+    // One box per source. Merged, the built document's pages are the kept
+    // pages in order, so each gets its own source's box.
+    if (!multi) return crop;
+    return parts.flatMap(({ source, pages }) => pages.map(() => cropOf(source)));
+  }, [settings.cropEnabled, settings.uniformCrop, crop, detected, multi, parts, cropOf]);
 
   useEffect(() => {
     if (parts.length === 0) return;
@@ -613,6 +619,8 @@ export default function App() {
     const twoUp = settings.binding !== "none";
     // Printing silently with a flip nobody has checked is how a stack of
     // upside-down backs happens; the panel walks through the test instead.
+    // Turning the stack by hand needs the panel to pause between the passes.
+    if (twoUp && printPrefs.manualDuplex) { openPrint(); return; }
     if (twoUp && !tested.has(testKey(printPrefs.deviceName, settings.duplexFlip))) {
       openPrint(); return;
     }
@@ -738,7 +746,7 @@ export default function App() {
             <div className="restored" role="status">
               <span>Using your last settings.</span>
               <button type="button" className="link-btn"
-                onClick={() => { setSettings(DEFAULTS); setCrop(detected?.shared ?? FULL_PAGE); setRestored(false); }}>
+                onClick={() => { setSettings(DEFAULTS); setCrops({}); setRestored(false); }}>
                 Reset to defaults
               </button>
               <button type="button" className="link-btn" onClick={() => setRestored(false)}
@@ -841,14 +849,16 @@ export default function App() {
               <>
                 <Field label="">
                   <Switch label="Same crop for every page"
-                    sub={settings.uniformCrop ? "One box, safest for books" : "Each page trimmed on its own"}
+                    sub={settings.uniformCrop
+                      ? (multi ? "One box per file — pick a file above to adjust its own" : "One box, safest for books")
+                      : "Each page trimmed on its own"}
                     checked={settings.uniformCrop} onChange={(v) => set("uniformCrop", v)}
                     disabled={!detected} />
                 </Field>
                 {settings.uniformCrop && (
                   <CropPanel renderSample={renderSample} pageNumber={Math.min(2, pageCount)} crop={crop}
-                    detected={detected?.shared ?? null} onChange={setCrop}
-                    onReset={() => setCrop(detected?.shared ?? FULL_PAGE)} />
+                    detected={active?.scan?.shared ?? null} onChange={setCrop}
+                    onReset={() => setCrop(active?.scan?.shared ?? FULL_PAGE)} />
                 )}
               </>
             )}

@@ -20,6 +20,7 @@ const PRINT_DEFAULTS = {
   color: true,
   paperName: null,
   scale: 100, // percent; anything but 100 refits the finished imposition
+  manualDuplex: false, // true: the printer cannot turn paper over; backs wait for the user
 };
 
 const DEFAULTS = {

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { formatRanges, parseRanges, sheetsToPageRanges } from "./ranges";
+import { formatRanges, parseRanges, sheetsToPageRanges, splitSides } from "./ranges";
 
 const pages = (text: string, count = 20) => {
   const r = parseRanges(text, count);
@@ -98,5 +98,17 @@ describe("sheetsToPageRanges", () => {
   test("takes the parser's output directly", () => {
     const parsed = parseRanges("2-4", 20);
     expect(parsed.ok && sheetsToPageRanges(parsed.pages, true)).toEqual([{ from: 2, to: 7 }]);
+  });
+});
+
+
+test("splitSides puts even output pages first, odd ones second", () => {
+  expect(splitSides(undefined, 5)).toEqual({
+    fronts: [{ from: 0, to: 0 }, { from: 2, to: 2 }, { from: 4, to: 4 }],
+    backs: [{ from: 1, to: 1 }, { from: 3, to: 3 }],
+  });
+  expect(splitSides([{ from: 2, to: 3 }], 10)).toEqual({
+    fronts: [{ from: 2, to: 2 }],
+    backs: [{ from: 3, to: 3 }],
   });
 });
